@@ -8,14 +8,14 @@ static USB::CDC::LineCoding LineCoding = {};
 static struct {
     std::mutex lock;
     std::condition_variable signal;
-    std::deque<VirtualUSBDevice::Msg> queue;
+    std::deque<VirtualUSBDevice::Xfer> queue;
     bool dtePresent = false;
-} _Msgs;
+} _Xfers;
 
-static void _handleRequestEP0(VirtualUSBDevice& d, VirtualUSBDevice::Msg&& msg) {
-    const USB::SetupRequest req = msg.getSetupRequest();
-    const uint8_t* payload = msg.payload.get();
-    const size_t payloadLen = msg.payloadLen;
+static void _handleRequestEP0(VirtualUSBDevice& d, VirtualUSBDevice::Xfer&& xfer) {
+    const USB::SetupRequest req = xfer.getSetupRequest();
+    const uint8_t* payload = xfer.payload.get();
+    const size_t payloadLen = xfer.payloadLen;
     
     // Verify that this is a Class request intended for an Interface
     if (req.bmRequestType != (USB::RequestType::TypeClass|USB::RequestType::RecipientInterface))
@@ -39,27 +39,27 @@ static void _handleRequestEP0(VirtualUSBDevice& d, VirtualUSBDevice::Msg&& msg) 
         printf("  bCharFormat: %08x\n", LineCoding.bCharFormat);
         printf("  bParityType: %08x\n", LineCoding.bParityType);
         printf("  bDataBits: %08x\n", LineCoding.bDataBits);
-        return d.reply(msg, nullptr, 0);
+        return d.reply(xfer, nullptr, 0);
     }
     
     case USB::CDC::Request::GET_LINE_CODING: {
         printf("GET_LINE_CODING\n");
         if (payloadLen != sizeof(LineCoding))
             throw RuntimeError("SET_LINE_CODING: payloadLen doesn't match sizeof(USB::CDC::LineCoding)");
-        return d.reply(msg, &LineCoding, sizeof(LineCoding));
+        return d.reply(xfer, &LineCoding, sizeof(LineCoding));
     }
     
     case USB::CDC::Request::SET_CONTROL_LINE_STATE: {
         const bool dtePresent = req.wValue&1;
         printf("SET_CONTROL_LINE_STATE:\n");
         printf("  dtePresent=%d\n", dtePresent);
-        auto lock = std::unique_lock(_Msgs.lock);
-        _Msgs.dtePresent = dtePresent;
-        if (!_Msgs.dtePresent) {
-            _Msgs.queue.clear();
+        auto lock = std::unique_lock(_Xfers.lock);
+        _Xfers.dtePresent = dtePresent;
+        if (!_Xfers.dtePresent) {
+            _Xfers.queue.clear();
         }
-        _Msgs.signal.notify_all();
-        return d.reply(msg, nullptr, 0);
+        _Xfers.signal.notify_all();
+        return d.reply(xfer, nullptr, 0);
     }
     
     default:
@@ -67,31 +67,31 @@ static void _handleRequestEP0(VirtualUSBDevice& d, VirtualUSBDevice::Msg&& msg) 
     }
 }
 
-static bool _handleRequestEPX(VirtualUSBDevice& d, VirtualUSBDevice::Msg&& msg) {
-    const uint8_t ep = msg.getEndpointAddress();
-//    const uint8_t* payload = msg.payload.get();
-//    const size_t payloadLen = msg.payloadLen;
+static bool _handleRequestEPX(VirtualUSBDevice& d, VirtualUSBDevice::Xfer&& xfer) {
+    const uint8_t ep = xfer.getEndpointAddress();
+//    const uint8_t* payload = xfer.payload.get();
+//    const size_t payloadLen = xfer.payloadLen;
     
     switch (ep) {
     case Endpoint::In1: {
         printf("Endpoint::In1\n");
-        auto lock = std::unique_lock(_Msgs.lock);
-        _Msgs.queue.push_back(std::move(msg));
-        _Msgs.signal.notify_all();
+        auto lock = std::unique_lock(_Xfers.lock);
+        _Xfers.queue.push_back(std::move(xfer));
+        _Xfers.signal.notify_all();
         break;
     }
     
     case Endpoint::In2: {
         printf("Endpoint::In2\n");
-        auto lock = std::unique_lock(_Msgs.lock);
-        _Msgs.queue.push_back(std::move(msg));
-        _Msgs.signal.notify_all();
+        auto lock = std::unique_lock(_Xfers.lock);
+        _Xfers.queue.push_back(std::move(xfer));
+        _Xfers.signal.notify_all();
         break;
     }
     
     case Endpoint::Out2: {
         printf("Endpoint::Out2\n");
-        d.reply(msg, nullptr, 0);
+        d.reply(xfer, nullptr, 0);
         break;
     }
     
@@ -102,36 +102,36 @@ static bool _handleRequestEPX(VirtualUSBDevice& d, VirtualUSBDevice::Msg&& msg) 
     return true;
 }
 
-static void _handleMessage(VirtualUSBDevice& d, VirtualUSBDevice::Msg&& msg) {
+static void _handleMessage(VirtualUSBDevice& d, VirtualUSBDevice::Xfer&& xfer) {
     // Endpoint 0
-    if (!msg.cmd.base.ep) _handleRequestEP0(d, std::move(msg));
+    if (!xfer.cmd.base.ep) _handleRequestEP0(d, std::move(xfer));
     // Other endpoints
-    else _handleRequestEPX(d, std::move(msg));
+    else _handleRequestEPX(d, std::move(xfer));
 }
 
 static void _threadResponse(VirtualUSBDevice& d) {
     for (;;) {
-        auto lock = std::unique_lock(_Msgs.lock);
-        while (!_Msgs.dtePresent || _Msgs.queue.empty()) {
-            _Msgs.signal.wait(lock);
+        auto lock = std::unique_lock(_Xfers.lock);
+        while (!_Xfers.dtePresent || _Xfers.queue.empty()) {
+            _Xfers.signal.wait(lock);
         }
         
-        VirtualUSBDevice::Msg msg = std::move(_Msgs.queue.front());
-        _Msgs.queue.pop_front();
+        VirtualUSBDevice::Xfer xfer = std::move(_Xfers.queue.front());
+        _Xfers.queue.pop_front();
         lock.unlock();
         
-        const uint8_t ep = msg.getEndpointAddress();
+        const uint8_t ep = xfer.getEndpointAddress();
         switch (ep) {
         case Endpoint::In1: {
             printf("_threadResponse: replied to Endpoint::In1\n");
-            d.reply(msg, nullptr, 0);
+            d.reply(xfer, nullptr, 0);
             break;
         }
         
         case Endpoint::In2: {
             printf("_threadResponse: replied to Endpoint::In2\n");
             char text[] = "Testing\r\n";
-            d.reply(msg, text, strlen(text));
+            d.reply(xfer, text, strlen(text));
             break;
         }
         
@@ -182,14 +182,14 @@ int main(int argc, const char* argv[]) {
 //        }).detach();
         
         for (;;) {
-            VirtualUSBDevice::Msg msg = device.read();
-            _handleMessage(device, std::move(msg));
+            VirtualUSBDevice::Xfer xfer = device.read();
+            _handleMessage(device, std::move(xfer));
         }
         
     } catch (const std::exception& e) {
         fprintf(stderr, "Error: %s\n", e.what());
         // Using _exit to avoid calling destructors for static vars, since that hangs
-        // in __pthread_cond_destroy, because our thread is sitting in _Msgs.signal.wait()
+        // in __pthread_cond_destroy, because our thread is sitting in _Xfers.signal.wait()
         _exit(1);
     }
     

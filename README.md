@@ -8,7 +8,7 @@ The implementation relies on the `usbip` subsystem, but is self-contained and do
 
 To create a virtual USB device, instantiate a `VirtualUSBDevice` (supplying standard USB descriptors to the constructor), and call `start()`.
 
-To handle USB transfers, call `read()`. The returned `VirtualUSBDevice::Msg` object represents the USB transfer to be performed. Before `read()` returns, `VirtualUSBDevice()` will automatically handle standard USB requests (such as `GET_STATUS`, `GET_DESCRIPTOR`, `SET_CONFIGURATION`), and will only return from `read()` when there's a USB transfer that it can't handle itself.
+To handle USB transfers, call `read()`. The returned `VirtualUSBDevice::Xfer` object represents the USB transfer to be performed. Before `read()` returns, `VirtualUSBDevice()` will automatically handle standard USB requests (such as `GET_STATUS`, `GET_DESCRIPTOR`, `SET_CONFIGURATION`), and will only return from `read()` when there's a USB transfer that it can't handle itself.
 
 To tear down the virtual device, call `stop()`.
 
