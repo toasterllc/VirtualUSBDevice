@@ -1,0 +1,6 @@
+[submodule "lib/Toastbox"]
+	path = lib/Toastbox
+	url = git@github.com:heytoaster/Toastbox.git
+[submodule "Lib/Toastbox"]
+	path = Lib/Toastbox
+	url = git@github.com:heytoaster/Toastbox.git

@@ -1,0 +1,4 @@
+*.o
+*.xcodeproj
+.gdb_history
+VirtualUSBDevice
