@@ -9,4 +9,4 @@ all: ${OBJECTS}
 	$(CXX) $(CXXFLAGS) $? -o $(NAME) $(LFLAGS)
 
 clean:
-	rm -Rf *.o $(NAME)
+	rm -Rf Src/*.o $(NAME)
