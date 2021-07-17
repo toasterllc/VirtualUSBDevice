@@ -16,50 +16,71 @@ static void _handleXferEP0(VirtualUSBDevice& dev, VirtualUSBDevice::Xfer&& xfer)
     const uint8_t* payload = xfer.data.get();
     const size_t payloadLen = xfer.len;
     
-    // Verify that this is a Class request intended for an Interface
-    if (req.bmRequestType != (USB::RequestType::TypeClass|USB::RequestType::RecipientInterface))
-        throw RuntimeError("invalid request");
+    // Verify that this request is a Class request
+    if ((req.bmRequestType&USB::RequestType::TypeMask) != USB::RequestType::TypeClass)
+        throw RuntimeError("invalid request bmRequestType (TypeClass)");
     
-    switch (req.bRequest) {
-    case USB::CDC::Request::SET_LINE_CODING: {
-        if (payloadLen != sizeof(LineCoding))
-            throw RuntimeError("SET_LINE_CODING: payloadLen doesn't match sizeof(USB::CDC::LineCoding)");
+    // Verify that this request is intended for the interface
+    if ((req.bmRequestType&USB::RequestType::RecipientMask) != USB::RequestType::RecipientInterface)
+        throw RuntimeError("invalid request bmRequestType (RecipientInterface)");
+    
+    switch (req.bmRequestType&USB::RequestType::DirectionMask) {
+    case USB::RequestType::DirectionHostToDevice:
+        switch (req.bRequest) {
+        case USB::CDC::Request::SET_LINE_CODING: {
+            if (payloadLen != sizeof(LineCoding))
+                throw RuntimeError("SET_LINE_CODING: payloadLen doesn't match sizeof(USB::CDC::LineCoding)");
+            
+            memcpy(&LineCoding, payload, sizeof(LineCoding));
+            LineCoding = {
+                .dwDTERate      = Endian::HFL_U32(LineCoding.dwDTERate),
+                .bCharFormat    = Endian::HFL_U8(LineCoding.bCharFormat),
+                .bParityType    = Endian::HFL_U8(LineCoding.bParityType),
+                .bDataBits      = Endian::HFL_U8(LineCoding.bDataBits),
+            };
+            
+            printf("SET_LINE_CODING:\n");
+            printf("  dwDTERate: %08x\n", LineCoding.dwDTERate);
+            printf("  bCharFormat: %08x\n", LineCoding.bCharFormat);
+            printf("  bParityType: %08x\n", LineCoding.bParityType);
+            printf("  bDataBits: %08x\n", LineCoding.bDataBits);
+            return;
+        }
         
-        memcpy(&LineCoding, payload, sizeof(LineCoding));
-        LineCoding = {
-            .dwDTERate      = Endian::HFL_U32(LineCoding.dwDTERate),
-            .bCharFormat    = Endian::HFL_U8(LineCoding.bCharFormat),
-            .bParityType    = Endian::HFL_U8(LineCoding.bParityType),
-            .bDataBits      = Endian::HFL_U8(LineCoding.bDataBits),
-        };
+        case USB::CDC::Request::SET_CONTROL_LINE_STATE: {
+            const bool dtePresent = req.wValue&1;
+            printf("SET_CONTROL_LINE_STATE:\n");
+            printf("  dtePresent=%d\n", dtePresent);
+            auto lock = std::unique_lock(_State.lock);
+            _State.dtePresent = dtePresent;
+            _State.signal.notify_all();
+            return;
+        }
         
-        printf("SET_LINE_CODING:\n");
-        printf("  dwDTERate: %08x\n", LineCoding.dwDTERate);
-        printf("  bCharFormat: %08x\n", LineCoding.bCharFormat);
-        printf("  bParityType: %08x\n", LineCoding.bParityType);
-        printf("  bDataBits: %08x\n", LineCoding.bDataBits);
-        return dev.write(USB::Endpoint::DefaultIn, nullptr, 0);
-    }
+        case USB::CDC::Request::SEND_BREAK: {
+            printf("SEND_BREAK:\n");
+            return;
+        }
+        
+        default:
+            throw RuntimeError("invalid request (DirectionHostToDevice): %x", req.bRequest);
+        }
     
-    case USB::CDC::Request::GET_LINE_CODING: {
-        printf("GET_LINE_CODING\n");
-        if (payloadLen != sizeof(LineCoding))
-            throw RuntimeError("SET_LINE_CODING: payloadLen doesn't match sizeof(USB::CDC::LineCoding)");
-        return dev.write(USB::Endpoint::DefaultIn, &LineCoding, sizeof(LineCoding));
-    }
-    
-    case USB::CDC::Request::SET_CONTROL_LINE_STATE: {
-        const bool dtePresent = req.wValue&1;
-        printf("SET_CONTROL_LINE_STATE:\n");
-        printf("  dtePresent=%d\n", dtePresent);
-        auto lock = std::unique_lock(_State.lock);
-        _State.dtePresent = dtePresent;
-        _State.signal.notify_all();
-        return dev.write(USB::Endpoint::DefaultIn, nullptr, 0);
-    }
+    case USB::RequestType::DirectionDeviceToHost:
+        switch (req.bRequest) {
+        case USB::CDC::Request::GET_LINE_CODING: {
+            printf("GET_LINE_CODING\n");
+            if (payloadLen != sizeof(LineCoding))
+                throw RuntimeError("SET_LINE_CODING: payloadLen doesn't match sizeof(USB::CDC::LineCoding)");
+            return dev.write(USB::Endpoint::DefaultIn, &LineCoding, sizeof(LineCoding));
+        }
+        
+        default:
+            throw RuntimeError("invalid request (DirectionDeviceToHost): %x", req.bRequest);
+        }
     
     default:
-        throw RuntimeError("invalid request");
+        throw RuntimeError("invalid request direction");
     }
 }
 
