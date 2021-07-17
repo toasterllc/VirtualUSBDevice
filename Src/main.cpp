@@ -3,7 +3,7 @@
 #include "Descriptor.h"
 #include "RuntimeError.h"
 
-static USB::CDC::LineCoding LineCoding = {};
+static USB::CDC::LineCoding _LineCoding = {};
 
 static struct {
     std::mutex lock;
@@ -28,22 +28,22 @@ static void _handleXferEP0(VirtualUSBDevice& dev, VirtualUSBDevice::Xfer&& xfer)
     case USB::RequestType::DirectionHostToDevice:
         switch (req.bRequest) {
         case USB::CDC::Request::SET_LINE_CODING: {
-            if (payloadLen != sizeof(LineCoding))
+            if (payloadLen != sizeof(_LineCoding))
                 throw RuntimeError("SET_LINE_CODING: payloadLen doesn't match sizeof(USB::CDC::LineCoding)");
             
-            memcpy(&LineCoding, payload, sizeof(LineCoding));
-            LineCoding = {
-                .dwDTERate      = Endian::HFL_U32(LineCoding.dwDTERate),
-                .bCharFormat    = Endian::HFL_U8(LineCoding.bCharFormat),
-                .bParityType    = Endian::HFL_U8(LineCoding.bParityType),
-                .bDataBits      = Endian::HFL_U8(LineCoding.bDataBits),
+            memcpy(&_LineCoding, payload, sizeof(_LineCoding));
+            _LineCoding = {
+                .dwDTERate      = Endian::HFL_U32(_LineCoding.dwDTERate),
+                .bCharFormat    = Endian::HFL_U8(_LineCoding.bCharFormat),
+                .bParityType    = Endian::HFL_U8(_LineCoding.bParityType),
+                .bDataBits      = Endian::HFL_U8(_LineCoding.bDataBits),
             };
             
             printf("SET_LINE_CODING:\n");
-            printf("  dwDTERate: %08x\n", LineCoding.dwDTERate);
-            printf("  bCharFormat: %08x\n", LineCoding.bCharFormat);
-            printf("  bParityType: %08x\n", LineCoding.bParityType);
-            printf("  bDataBits: %08x\n", LineCoding.bDataBits);
+            printf("  dwDTERate: %08x\n", _LineCoding.dwDTERate);
+            printf("  bCharFormat: %08x\n", _LineCoding.bCharFormat);
+            printf("  bParityType: %08x\n", _LineCoding.bParityType);
+            printf("  bDataBits: %08x\n", _LineCoding.bDataBits);
             return;
         }
         
@@ -70,9 +70,10 @@ static void _handleXferEP0(VirtualUSBDevice& dev, VirtualUSBDevice::Xfer&& xfer)
         switch (req.bRequest) {
         case USB::CDC::Request::GET_LINE_CODING: {
             printf("GET_LINE_CODING\n");
-            if (payloadLen != sizeof(LineCoding))
+            if (payloadLen != sizeof(_LineCoding))
                 throw RuntimeError("SET_LINE_CODING: payloadLen doesn't match sizeof(USB::CDC::LineCoding)");
-            return dev.write(USB::Endpoint::DefaultIn, &LineCoding, sizeof(LineCoding));
+            dev.write(USB::Endpoint::DefaultIn, &_LineCoding, sizeof(_LineCoding));
+            return;
         }
         
         default:
