@@ -183,176 +183,8 @@ public:
             if (_s.err) std::rethrow_exception(_s.err);
             for (;;) {
                 const Cmd cmd = _readCmd(lock);
-                
-                switch (cmd.base.command) {
-                case USBIPLib::USBIP_CMD_SUBMIT: {
-                    const uint8_t epIdx = cmd.base.ep;
-                    if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
-                    
-                    switch (cmd.base.direction) {
-                    // OUT command (data from host->device):
-                    //   Let the host know we received their data, and return the payload to the caller.
-                    case USBIPLib::USBIP_DIR_OUT: {
-                        std::unique_ptr<uint8_t[]> payload;
-                        const size_t payloadLen = cmd.cmd_submit.transfer_buffer_length;
-                        
-                        if (payloadLen) {
-                            payload = std::make_unique<uint8_t[]>(payload.len);
-                            _read(lock, payload.get(), payloadLen);
-                        }
-                        
-                        // Handle default control endpoint
-                        if (epIdx == 0) {
-                            const USB::SetupRequest setupReq = _GetSetupRequest(cmd);
-                            const bool standardType =
-                                (setupReq.bmRequestType & USB::RequestType::TypeMask) == USB::RequestType::TypeStandard;
-                            
-                            // We handle all standard requests
-                            if (standardType) {
-                                // We shouldn't have a payload for standard requests
-                                if (payload) throw RuntimeError("unexpected payload for endpoint 0 standard USB request");
-                                _handleStandardSetupRequest(lock, cmd, setupReq);
-                            
-                            // Otherwise, return the transfer to the caller
-                            } else {
-                                // No _reply() here -- since this is the default control endpoint,
-                                // the caller needs to write() the reply.
-                                return Xfer{
-                                    .ep = _GetEndpointAddr(cmd),
-                                    .setup = setupReq,
-                                    .data = std::move(payload),
-                                    .len = payloadLen,
-                                };
-                                // TODO: return to caller
-                            }
-                        
-                        // Handle all other endpoints
-                        } else {
-                            // Let host know that we received the data
-                            _reply(lock, cmd, nullptr, 0);
-                            return Xfer{
-                                .ep = _GetEndpointAddr(cmd),
-                                .data = std::move(payload),
-                                .len = payloadLen,
-                            };
-                        }
-                        break;
-                    }
-                    
-                    // IN command (data from device->host):
-                    //   Check whether we have queued data waiting to be sent for the specified endpoint.
-                    case USBIPLib::USBIP_DIR_IN: {
-                        if (epIdx == 0) throw RuntimeError("unexpected IN transfer for endpoint 0");
-                        auto& epInData = _s.inData[epIdx];
-                        // Send the data if we already have some queued for the IN command
-                        if (!epInData.empty()) {
-                            Data& d = epInData.front();
-                            _reply(lock, cmd, d.data.get(), d.len);
-                            epInData.pop_front();
-                        
-                        // Otherwise, queue the IN command until data is written for the endpoint
-                        } else {
-                            auto& epInCmds = _s.inCmds[epIdx];
-                            epInCmds.push_back(cmd);
-                        }
-                        break;
-                    }
-                    
-                    default:
-                        throw RuntimeError("invalid Cmd direction");
-                    }
-                    break;
-                }
-                
-                case USBIPLib::USBIP_CMD_UNLINK: {
-                    printf("UNLINK for endpoint %x (idx=%u) %u\n", _GetEndpointAddr(cmd), cmd.base.ep, cmd.cmd_unlink.seqnum);
-                    
-                    // TODO: we probably don't need to loop over every deque, just look at `cmd.base.ep`
-                    // Remove the IN cmd from the endpoint's inCmds deque
-                    bool found = false;
-                    for (std::deque<Cmd>& deq : _s.inCmds) {
-                        for (auto it=deq.begin(); it!=deq.end(); it++) {
-                            const Cmd& cmd = *it;
-                            if (cmd.base.seqnum == cmd.cmd_unlink.seqnum) {
-                                deq.erase(it);
-                                break;
-                            }
-                        }
-                        if (found) break;
-                    }
-                    
-                    // status = -ECONNRESET on success
-                    const int32_t status = (found ? -ECONNRESET : 0);
-                    _reply(lock, cmd, nullptr, 0, status);
-                    break;
-                }
-                
-                default:
-                    throw RuntimeError("invalid USBIP command: %u", cmd.base.command);
-                }
-                
-                Data payload = {
-                    .ep = _GetEndpointAddr(cmd),
-                };
-                
-                // Read the payload for OUT transfers
-                if (cmd.base.command==USBIPLib::USBIP_CMD_SUBMIT &&
-                    cmd.base.direction==USBIPLib::USBIP_DIR_OUT) {
-                    // Set payload length if this is data coming from the host
-                    payload.len = cmd.cmd_submit.transfer_buffer_length;
-                    
-                    if (payload.len) {
-                        payload.data = std::make_unique<uint8_t[]>(payload.len);
-                        _read(lock, payload.data.get(), payload.len);
-                    }
-                }
-                
-                const bool handled = _handleCmd(lock, cmd);
-                
-                // If we handled the command, there's nothing left to do, so continue
-                // waiting for another command.
-                if (handled) continue;
-                
-                switch (cmd.base.direction) {
-                // OUT command (data from host->device):
-                //   Let the host know we received their data, and return the payload to the caller.
-                case USBIPLib::USBIP_DIR_OUT: {
-                    // If this is endpoint 0, we need to copy the USB setup request from cmd.cmd_submit.setup into the payload
-                    if (cmd.base.ep == 0) {
-                        payload.data = std::make_unique<uint8_t[]>(sizeof(cmd.cmd_submit.setup.u8));
-                        memcpy(payload.data.get(), cmd.cmd_submit.setup.u8, sizeof(cmd.cmd_submit.setup.u8));
-                    // Otherwise, 
-                    } else {
-                        _reply(lock, cmd, nullptr, 0);
-                    }
-                    
-                    return payload;
-                }
-                
-                // IN command (data from device->host):
-                //   Check whether we have queued data waiting to be sent for the specified endpoint.
-                case USBIPLib::USBIP_DIR_IN: {
-                    const uint8_t epIdx = cmd.base.ep;
-                    if (epIdx == 0) throw RuntimeError("unexpected IN transfer for endpoint 0");
-                    if (epIdx >= std::size(_s.inData)) throw RuntimeError("invalid Cmd direction");
-                    
-                    auto& epInData = _s.inData[epIdx];
-                    // Send the data if we already have some queued for the IN command
-                    if (!epInData.empty()) {
-                        Data& d = epInData.front();
-                        _reply(lock, cmd, d.data.get(), d.len);
-                        epInData.pop_front();
-                    
-                    // Otherwise, queue the IN command until data is written for the endpoint
-                    } else {
-                        auto& epInCmds = _s.inCmds[epIdx];
-                        epInCmds.push_back(cmd);
-                    }
-                }
-                
-                default:
-                    throw RuntimeError("invalid Cmd direction");
-                }
+                auto xfer = _handleCmd(lock, cmd);
+                if (xfer) return *xfer;
             }
         } catch (const std::exception& e) {
             _reset(lock, std::current_exception());
@@ -382,8 +214,7 @@ public:
             } else {
                 auto& epInData = _s.inData[epIdx];
                 // Enqueue the data into `epInData`
-                Data d = {
-                    .ep = ep,
+                _Data d = {
                     .data = std::make_unique<uint8_t[]>(len),
                     .len = len,
                 };
@@ -721,43 +552,160 @@ private:
         _write(lock, data, len);
     }
     
-    // _s.lock must be held
-    bool _handleCmd(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
+    std::optional<Xfer> _handleCmd(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
         switch (cmd.base.command) {
-        case USBIPLib::USBIP_CMD_SUBMIT: {
-            // Endpoint 0
-            if (cmd.base.ep == 0) return _handleRequestEP0(lock, cmd);
-            // Other endpoints
-            else return false;
-        }
-        
-        case USBIPLib::USBIP_CMD_UNLINK: {
-            printf("UNLINK for endpoint %x (idx=%u) %u\n", _GetEndpointAddr(cmd), cmd.base.ep, cmd.cmd_unlink.seqnum);
+        case USBIPLib::USBIP_CMD_SUBMIT:
+            switch (cmd.base.direction) {
+            // OUT command (data from host->device)
+            case USBIPLib::USBIP_DIR_OUT:
+                return _handleCmdSubmitOut(lock, cmd);
             
-            // TODO: we probably don't need to loop over every deque, just look at `cmd.base.ep`
-            // Remove the IN cmd from the endpoint's inCmds deque
-            bool found = false;
-            for (std::deque<Cmd>& deq : _s.inCmds) {
-                for (auto it=deq.begin(); it!=deq.end(); it++) {
-                    const Cmd& cmd = *it;
-                    if (cmd.base.seqnum == cmd.cmd_unlink.seqnum) {
-                        deq.erase(it);
-                        break;
-                    }
-                }
-                if (found) break;
+            // IN command (data from device->host)
+            case USBIPLib::USBIP_DIR_IN:
+                _handleCmdSubmitIn(lock, cmd);
+                return std::nullopt;
+            
+            default:
+                throw RuntimeError("invalid Cmd direction");
             }
-            
-            // status = -ECONNRESET on success
-            const int32_t status = (found ? -ECONNRESET : 0);
-            _reply(lock, cmd, nullptr, 0, status);
-            return true;
-        }
+        
+        case USBIPLib::USBIP_CMD_UNLINK:
+            _handleCmdUnlink(lock, cmd);
+            return std::nullopt;
         
         default:
-            throw RuntimeError("unknown USBIP command: %u", cmd.base.command);
+            throw RuntimeError("invalid USBIP command: %u", cmd.base.command);
         }
     }
+    
+    std::optional<Xfer> _handleCmdSubmitOut(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
+        const uint8_t epIdx = cmd.base.ep;
+        if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
+        
+        std::unique_ptr<uint8_t[]> payload;
+        const size_t payloadLen = cmd.cmd_submit.transfer_buffer_length;
+        
+        if (payloadLen) {
+            payload = std::make_unique<uint8_t[]>(payload.len);
+            _read(lock, payload.get(), payloadLen);
+        }
+        
+        // Handle default control endpoint
+        if (epIdx == 0) {
+            const USB::SetupRequest setupReq = _GetSetupRequest(cmd);
+            const bool standardType =
+                (setupReq.bmRequestType & USB::RequestType::TypeMask) == USB::RequestType::TypeStandard;
+            
+            // We handle all standard requests
+            if (standardType) {
+                // We shouldn't have a payload for standard requests
+                if (payload) throw RuntimeError("unexpected payload for endpoint 0 standard USB request");
+                _handleStandardSetupRequest(lock, cmd, setupReq);
+            
+            // Otherwise, return the transfer to the caller
+            } else {
+                // No _reply() here -- since this is the default control endpoint,
+                // the caller needs to write() the reply.
+                return Xfer{
+                    .ep = _GetEndpointAddr(cmd),
+                    .setup = setupReq,
+                    .data = std::move(payload),
+                    .len = payloadLen,
+                };
+            }
+        
+        // Handle all other endpoints
+        } else {
+            // Let host know that we received the data
+            _reply(lock, cmd, nullptr, 0);
+            return Xfer{
+                .ep = _GetEndpointAddr(cmd),
+                .data = std::move(payload),
+                .len = payloadLen,
+            };
+        }
+        return std::nullopt;
+    }
+    
+    void _handleCmdSubmitIn(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
+        const uint8_t epIdx = cmd.base.ep;
+        if (epIdx == 0) throw RuntimeError("unexpected IN transfer for endpoint 0");
+        if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
+        auto& epInData = _s.inData[epIdx];
+        // Send the data if we already have some queued for the IN command
+        if (!epInData.empty()) {
+            Data& d = epInData.front();
+            _reply(lock, cmd, d.data.get(), d.len);
+            epInData.pop_front();
+        
+        // Otherwise, queue the IN command until data is written for the endpoint
+        } else {
+            auto& epInCmds = _s.inCmds[epIdx];
+            epInCmds.push_back(cmd);
+        }
+    }
+    
+    void _handleCmdUnlink(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
+        const uint8_t epIdx = cmd.base.ep;
+        if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
+        printf("UNLINK for endpoint %x (idx=%u) %u\n", _GetEndpointAddr(cmd), cmd.base.ep, cmd.cmd_unlink.seqnum);
+        
+        // TODO: we probably don't need to loop over every deque, just look at `cmd.base.ep`
+        // Remove the IN cmd from the endpoint's inCmds deque
+        bool found = false;
+        for (std::deque<Cmd>& deq : _s.inCmds) {
+            for (auto it=deq.begin(); it!=deq.end(); it++) {
+                const Cmd& cmd = *it;
+                if (cmd.base.seqnum == cmd.cmd_unlink.seqnum) {
+                    deq.erase(it);
+                    break;
+                }
+            }
+            if (found) break;
+        }
+        
+        // status = -ECONNRESET on success
+        const int32_t status = (found ? -ECONNRESET : 0);
+        _reply(lock, cmd, nullptr, 0, status);
+    }
+    
+//    // _s.lock must be held
+//    bool _handleCmd(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
+//        switch (cmd.base.command) {
+//        case USBIPLib::USBIP_CMD_SUBMIT: {
+//            // Endpoint 0
+//            if (cmd.base.ep == 0) return _handleRequestEP0(lock, cmd);
+//            // Other endpoints
+//            else return false;
+//        }
+//        
+//        case USBIPLib::USBIP_CMD_UNLINK: {
+//            printf("UNLINK for endpoint %x (idx=%u) %u\n", _GetEndpointAddr(cmd), cmd.base.ep, cmd.cmd_unlink.seqnum);
+//            
+//            // TODO: we probably don't need to loop over every deque, just look at `cmd.base.ep`
+//            // Remove the IN cmd from the endpoint's inCmds deque
+//            bool found = false;
+//            for (std::deque<Cmd>& deq : _s.inCmds) {
+//                for (auto it=deq.begin(); it!=deq.end(); it++) {
+//                    const Cmd& cmd = *it;
+//                    if (cmd.base.seqnum == cmd.cmd_unlink.seqnum) {
+//                        deq.erase(it);
+//                        break;
+//                    }
+//                }
+//                if (found) break;
+//            }
+//            
+//            // status = -ECONNRESET on success
+//            const int32_t status = (found ? -ECONNRESET : 0);
+//            _reply(lock, cmd, nullptr, 0, status);
+//            return true;
+//        }
+//        
+//        default:
+//            throw RuntimeError("unknown USBIP command: %u", cmd.base.command);
+//        }
+//    }
     
     // _s.lock must be held
     void _handleStandardSetupRequest(std::unique_lock<std::mutex>& lock, const Cmd& cmd, const USB::SetupRequest& req) {
