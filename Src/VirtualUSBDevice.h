@@ -212,7 +212,10 @@ public:
         
         } catch (const std::exception& e) {
             _reset(lock, std::current_exception());
-            if (_info.throwOnErr) throw;
+            if (_info.throwOnErr) {
+                // Throw `_s.err`, not `e`, so that we throw the original cause (eg ErrStopped)
+                std::rethrow_exception(_s.err);
+            }
         }
     }
     
@@ -236,7 +239,10 @@ public:
         
         } catch (const std::exception& e) {
             _reset(lock, std::current_exception());
-            if (_info.throwOnErr) throw;
+            if (_info.throwOnErr) {
+                // Throw `_s.err`, not `e`, so that we throw the original cause (eg ErrStopped)
+                std::rethrow_exception(_s.err);
+            }
             return {};
         }
     }
@@ -272,7 +278,10 @@ public:
             }
         } catch (const std::exception& e) {
             _reset(lock, std::current_exception());
-            if (_info.throwOnErr) throw;
+            if (_info.throwOnErr) {
+                // Throw `_s.err`, not `e`, so that we throw the original cause (eg ErrStopped)
+                std::rethrow_exception(_s.err);
+            }
         }
     }
     
