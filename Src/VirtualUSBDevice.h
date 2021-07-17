@@ -50,20 +50,20 @@ public:
         switch (cmd.base.command) {
         case USBIPLib::USBIP_CMD_SUBMIT:
             printf("  transfer_flags          = %x\n", cmd.cmd_submit.transfer_flags);
-            printf("  transfer_buffer_length  = %x\n", cmd.cmd_submit.transfer_buffer_length);
-            printf("  start_frame             = %x\n", cmd.cmd_submit.start_frame);
-            printf("  number_of_packets       = %x\n", cmd.cmd_submit.number_of_packets);
-            printf("  interval                = %x\n", cmd.cmd_submit.interval);
+            printf("  transfer_buffer_length  = %d\n", cmd.cmd_submit.transfer_buffer_length);
+            printf("  start_frame             = %d\n", cmd.cmd_submit.start_frame);
+            printf("  number_of_packets       = %d\n", cmd.cmd_submit.number_of_packets);
+            printf("  interval                = %d\n", cmd.cmd_submit.interval);
             printf("  setup                   = %jx\n", (uintmax_t)cmd.cmd_submit.setup.u64);
             printf("\n");
             break;
         
         case USBIPLib::USBIP_RET_SUBMIT:
-            printf("  status                  = %x\n", cmd.ret_submit.status);
-            printf("  actual_length           = %x\n", cmd.ret_submit.actual_length);
-            printf("  start_frame             = %x\n", cmd.ret_submit.start_frame);
-            printf("  number_of_packets       = %x\n", cmd.ret_submit.number_of_packets);
-            printf("  error_count             = %x\n", cmd.ret_submit.error_count);
+            printf("  status                  = %d\n", cmd.ret_submit.status);
+            printf("  actual_length           = %d\n", cmd.ret_submit.actual_length);
+            printf("  start_frame             = %d\n", cmd.ret_submit.start_frame);
+            printf("  number_of_packets       = %d\n", cmd.ret_submit.number_of_packets);
+            printf("  error_count             = %d\n", cmd.ret_submit.error_count);
             printf("\n");
             break;
         
@@ -229,7 +229,7 @@ public:
             for (;;) {
                 const Cmd cmd = _readCmd(lock);
                 printf("Got cmd: ");
-//                _PrintCmd(cmd);
+                _PrintCmd(cmd);
                 auto xfer = _handleCmd(lock, cmd);
                 if (xfer) return std::move(*xfer);
             }
@@ -611,8 +611,7 @@ private:
             
             // IN command (data from device->host)
             case USBIPLib::USBIP_DIR_IN:
-                _handleCmdSubmitIn(lock, cmd);
-                return std::nullopt;
+                return _handleCmdSubmitIn(lock, cmd);
             
             default:
                 throw RuntimeError("invalid Cmd direction");
@@ -627,9 +626,10 @@ private:
         }
     }
     
-    std::optional<Xfer> _handleCmdSubmitOut(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
+    Xfer _handleCmdSubmitOut(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
         printf("_handleCmdSubmitOut\n");
         const uint8_t epIdx = cmd.base.ep;
+        if (epIdx == 0) throw RuntimeError("unexpected OUT transfer for endpoint 0");
         if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
         
         std::unique_ptr<uint8_t[]> payload;
@@ -640,6 +640,20 @@ private:
             _read(lock, payload.get(), payloadLen);
         }
         
+        // Let host know that we received the data
+        _reply(lock, cmd, nullptr, 0);
+        return Xfer{
+            .ep = _GetEndpointAddr(cmd),
+            .data = std::move(payload),
+            .len = payloadLen,
+        };
+    }
+    
+    std::optional<Xfer> _handleCmdSubmitIn(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
+        printf("_handleCmdSubmitIn\n");
+        const uint8_t epIdx = cmd.base.ep;
+        if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
+        
         // Handle default control endpoint
         if (epIdx == 0) {
             const USB::SetupRequest setupReq = _GetSetupRequest(cmd);
@@ -648,61 +662,47 @@ private:
             
             // We handle all standard requests
             if (standardType) {
-                // We shouldn't have a payload for standard requests
-                if (payload) throw RuntimeError("unexpected payload for endpoint 0 standard USB request");
+//                // We shouldn't have a payload for standard requests
+//                if (payload) throw RuntimeError("unexpected payload for endpoint 0 standard USB request");
                 _handleStandardSetupRequest(lock, cmd, setupReq);
                 return std::nullopt;
             
             // Otherwise, return the transfer to the caller
             } else {
-//                // The caller needs to reply by calling write(), so update _s.inCmds.
-//                auto& epInCmds = _s.inCmds[epIdx];
-//                epInCmds.push_back(cmd);
+                // The caller needs to reply by calling write(), so update _s.inCmds.
+                auto& epInCmds = _s.inCmds[epIdx];
+                epInCmds.push_back(cmd);
                 
                 // No _reply() here -- since this is the default control endpoint,
                 // the caller needs to write() the reply.
                 return Xfer{
                     .ep         = _GetEndpointAddr(cmd),
                     .setupReq   = setupReq,
-                    .data       = std::move(payload),
-                    .len        = payloadLen,
                 };
             }
         
-        // Handle all other endpoints
+        // All other endpoints
         } else {
-            // Let host know that we received the data
-            _reply(lock, cmd, nullptr, 0);
-            return Xfer{
-                .ep = _GetEndpointAddr(cmd),
-                .data = std::move(payload),
-                .len = payloadLen,
-            };
+            auto& epInData = _s.inData[epIdx];
+            // Send the data if we already have some queued for the IN command
+            if (!epInData.empty()) {
+                _Data& d = epInData.front();
+                _reply(lock, cmd, d.data.get(), d.len);
+                epInData.pop_front();
+            
+//            // Otherwise, reply that we don't have any data
+//            } else {
+//                _reply(lock, cmd, nullptr, 0);
+//            }
+            
+            // Otherwise, queue the IN command until data is written for the endpoint
+            } else {
+                auto& epInCmds = _s.inCmds[epIdx];
+                epInCmds.push_back(cmd);
+            }
+            
+            return std::nullopt;
         }
-    }
-    
-    void _handleCmdSubmitIn(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
-        printf("_handleCmdSubmitIn\n");
-        const uint8_t epIdx = cmd.base.ep;
-//        if (epIdx == 0) throw RuntimeError("unexpected IN transfer for endpoint 0");
-        if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
-        auto& epInData = _s.inData[epIdx];
-        // Send the data if we already have some queued for the IN command
-        if (!epInData.empty()) {
-            _Data& d = epInData.front();
-            _reply(lock, cmd, d.data.get(), d.len);
-            epInData.pop_front();
-        
-        // Otherwise, reply that we don't have any data
-        } else {
-            _reply(lock, cmd, nullptr, 0);
-        }
-        
-//        // Otherwise, queue the IN command until data is written for the endpoint
-//        } else {
-//            auto& epInCmds = _s.inCmds[epIdx];
-//            epInCmds.push_back(cmd);
-//        }
     }
     
     void _handleCmdUnlink(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
@@ -794,6 +794,7 @@ private:
             if (_SelfPowered(*_s.configDesc)) reply |= 1;
             reply = LFH_U16(reply);
             _reply(lock, cmd, &reply, sizeof(reply));
+            return;
         }
         
         case USB::Request::GetDescriptor: {
@@ -843,6 +844,7 @@ private:
             // Cap reply length to `wLength` in the original request
             replyDataLen = std::min(replyDataLen, (size_t)req.wLength);
             _reply(lock, cmd, replyData, replyDataLen, status);
+            return;
         }
         
         case USB::Request::SetConfiguration: {
@@ -860,6 +862,7 @@ private:
             
             if (!ok) throw RuntimeError("invalid Configuration value: %u", configVal);
             _reply(lock, cmd, nullptr, 0);
+            return;
         }
         
         default:
