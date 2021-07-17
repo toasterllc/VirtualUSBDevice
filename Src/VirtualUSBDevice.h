@@ -27,85 +27,89 @@ public:
         bool throwOnErr = false;
     };
     
-    using USBIPCmd = USBIP::HEADER;
+    using Cmd = USBIP::HEADER;
     using Err = std::exception_ptr;
     static const inline Err ErrStopped = std::make_exception_ptr(std::runtime_error("VirtualUSBDevice stopped"));
     
-    struct Xfer {
-        USBIPCmd cmd = {};
-        std::unique_ptr<uint8_t[]> payload;
-        size_t payloadLen = 0;
-        
-        USB::SetupRequest getSetupRequest() const {
-            using namespace Endian;
-            USB::SetupRequest req;
-            memcpy(&req, cmd.cmd_submit.setup.u8, sizeof(req));
-            req = {
-                .bmRequestType  = HFL_U8(req.bmRequestType),
-                .bRequest       = HFL_U8(req.bRequest),
-                .wValue         = HFL_U16(req.wValue),
-                .wIndex         = HFL_U16(req.wIndex),
-                .wLength        = HFL_U16(req.wLength),
-            };
-            return req;
-        }
-        
-        uint8_t getEndpointAddress() const {
-            const bool dirIn = cmd.base.direction==USBIPLib::USBIP_DIR_IN;
-            const uint8_t ep = cmd.base.ep | (dirIn ? 0x80 : 0x00);
-            return ep;
-        }
-        
-//        void print() const {
-//            printf("Xfer{\n");
-//            printf("  command                 = %x\n", cmd.base.command);
-//            printf("  seqnum                  = %x\n", cmd.base.seqnum);
-//            printf("  devid                   = %x\n", cmd.base.devid);
-//            printf("  direction               = %x\n", cmd.base.direction);
-//            printf("  ep                      = %x\n", cmd.base.ep);
-//            printf("\n");
-//            
-//            switch (cmd.base.command) {
-//            case USBIPLib::USBIP_CMD_SUBMIT:
-//                printf("  transfer_flags          = %x\n", cmd.cmd_submit.transfer_flags);
-//                printf("  transfer_buffer_length  = %x\n", cmd.cmd_submit.transfer_buffer_length);
-//                printf("  start_frame             = %x\n", cmd.cmd_submit.start_frame);
-//                printf("  number_of_packets       = %x\n", cmd.cmd_submit.number_of_packets);
-//                printf("  interval                = %x\n", cmd.cmd_submit.interval);
-//                printf("  setup                   = %jx\n", (uintmax_t)cmd.cmd_submit.setup.u64);
-//                printf("\n");
-//                break;
-//            
-//            case USBIPLib::USBIP_RET_SUBMIT:
-//                printf("  status                  = %x\n", cmd.ret_submit.status);
-//                printf("  actual_length           = %x\n", cmd.ret_submit.actual_length);
-//                printf("  start_frame             = %x\n", cmd.ret_submit.start_frame);
-//                printf("  number_of_packets       = %x\n", cmd.ret_submit.number_of_packets);
-//                printf("  error_count             = %x\n", cmd.ret_submit.error_count);
-//                printf("\n");
-//                break;
-//            
-//            case USBIPLib::USBIP_CMD_UNLINK:
-//                printf("  seqnum                  = %x\n", cmd.cmd_unlink.seqnum);
-//                printf("\n");
-//                break;
-//            
-//            case USBIPLib::USBIP_RET_UNLINK:
-//                printf("  status                  = %x\n", cmd.ret_unlink.status);
-//                printf("\n");
-//                break;
-//            
-//            default:
-//                throw RuntimeError("unknown USBIP command: %u", cmd.base.command);
-//            }
-//            
-//            printf("  Payload (len=%3zu)       = ", payloadLen);
-//            for (size_t i=0; i<payloadLen; i++) {
-//                printf("%c", payload[i]);
-//            }
-//            printf("\n}\n\n");
-//        }
+    struct Data {
+        uint8_t ep = 0;
+        std::unique_ptr<uint8_t[]> data;
+        size_t len = 0;
     };
+    
+//    struct Cmd {
+//        USBIPCmd cmd = {};
+//        
+//        USB::SetupRequest getSetupRequest() const {
+//            using namespace Endian;
+//            USB::SetupRequest req;
+//            memcpy(&req, cmd_submit.setup.u8, sizeof(req));
+//            req = {
+//                .bmRequestType  = HFL_U8(req.bmRequestType),
+//                .bRequest       = HFL_U8(req.bRequest),
+//                .wValue         = HFL_U16(req.wValue),
+//                .wIndex         = HFL_U16(req.wIndex),
+//                .wLength        = HFL_U16(req.wLength),
+//            };
+//            return req;
+//        }
+//        
+//        uint8_t getEndpointAddress() const {
+//            const bool dirIn = cmd.base.direction==USBIPLib::USBIP_DIR_IN;
+//            const uint8_t ep = cmd.base.ep | (dirIn ? 0x80 : 0x00);
+//            return ep;
+//        }
+//        
+////        void print() const {
+////            printf("Cmd{\n");
+////            printf("  command                 = %x\n", cmd.base.command);
+////            printf("  seqnum                  = %x\n", cmd.base.seqnum);
+////            printf("  devid                   = %x\n", cmd.base.devid);
+////            printf("  direction               = %x\n", cmd.base.direction);
+////            printf("  ep                      = %x\n", cmd.base.ep);
+////            printf("\n");
+////            
+////            switch (cmd.base.command) {
+////            case USBIPLib::USBIP_CMD_SUBMIT:
+////                printf("  transfer_flags          = %x\n", cmd_submit.transfer_flags);
+////                printf("  transfer_buffer_length  = %x\n", cmd_submit.transfer_buffer_length);
+////                printf("  start_frame             = %x\n", cmd_submit.start_frame);
+////                printf("  number_of_packets       = %x\n", cmd_submit.number_of_packets);
+////                printf("  interval                = %x\n", cmd_submit.interval);
+////                printf("  setup                   = %jx\n", (uintmax_t)cmd_submit.setup.u64);
+////                printf("\n");
+////                break;
+////            
+////            case USBIPLib::USBIP_RET_SUBMIT:
+////                printf("  status                  = %x\n", cmd.ret_submit.status);
+////                printf("  actual_length           = %x\n", cmd.ret_submit.actual_length);
+////                printf("  start_frame             = %x\n", cmd.ret_submit.start_frame);
+////                printf("  number_of_packets       = %x\n", cmd.ret_submit.number_of_packets);
+////                printf("  error_count             = %x\n", cmd.ret_submit.error_count);
+////                printf("\n");
+////                break;
+////            
+////            case USBIPLib::USBIP_CMD_UNLINK:
+////                printf("  seqnum                  = %x\n", cmd_unlink.seqnum);
+////                printf("\n");
+////                break;
+////            
+////            case USBIPLib::USBIP_RET_UNLINK:
+////                printf("  status                  = %x\n", cmd.ret_unlink.status);
+////                printf("\n");
+////                break;
+////            
+////            default:
+////                throw RuntimeError("unknown USBIP command: %u", cmd.base.command);
+////            }
+////            
+////            printf("  Payload (len=%3zu)       = ", payloadLen);
+////            for (size_t i=0; i<payloadLen; i++) {
+////                printf("%c", payload[i]);
+////            }
+////            printf("\n}\n\n");
+////        }
+//    };
     
     static const std::exception& ErrExtract(Err err) {
         assert(err);
@@ -127,6 +131,8 @@ public:
         auto lock = std::unique_lock(_s.lock);
         try {
             assert(_s.state == _State::Idle);
+            _s.state |= _State::Started;
+            
             const uint32_t speed = _SpeedFromBCDUSB(_info.deviceDesc->bcdDevice);
             int sockets[2] = {-1,-1};
             int ir = socketpair(AF_UNIX, SOCK_STREAM, 0, sockets);
@@ -154,9 +160,9 @@ public:
             close(_s.usbipSocket);
             _s.usbipSocket = -1;
             
-            _s.state |= _State::ThreadRunning;
-            std::thread thread([this] { _thread(); });
-            thread.detach();
+//            _s.state |= _State::ThreadRunning;
+//            std::thread thread([this] { _thread(); });
+//            thread.detach();
         
         } catch (const std::exception& e) {
             _reset(lock, std::current_exception());
@@ -169,52 +175,187 @@ public:
         _reset(lock, ErrStopped);
     }
     
-    Xfer read() {
-        auto lock = std::unique_lock(_s.lock);
-        try {
-            for (;;) {
-                // Bail if there's an error (and therefore we're stopped)
-                if (_s.err) std::rethrow_exception(_s.err);
-                // Wait until a message arrives
-                if (_s.xfers.empty()) {
-                    _s.signal.wait(lock);
-                    continue;
-                }
-                
-                Xfer xfer = std::move(_s.xfers.front());
-                _s.xfers.pop_front();
-                bool handled = _handleXfer(xfer);
-                if (!handled) {
-                    // We need a response, so add the seqnum to replySeqnums
-                    _s.replySeqnums.insert(xfer.cmd.base.seqnum);
-                    return xfer;
-                }
-            }
-        
-        } catch (const std::exception& e) {
-            _reset(lock, std::current_exception());
-            if (_info.throwOnErr) throw;
-            return {};
-        }
-    }
-    
-    void reply(const Xfer& xfer, const void* data, size_t len) {
+    Data read() {
         auto lock = std::unique_lock(_s.lock);
         try {
             // Bail if there's an error (and therefore we're stopped)
             if (_s.err) std::rethrow_exception(_s.err);
-            // Only reply if the seqnum is in `replySeqnums`.
-            // If it's not, it's been unlinked (or there's a bug in the client)
-            const size_t count = _s.replySeqnums.erase(xfer.cmd.base.seqnum);
-            if (count) {
-                _reply(xfer, data, len);
+            for (;;) {
+                Cmd cmd = _readCmd(lock);
+                Data payload = {
+                    .ep = _GetEndpointAddr(cmd),
+                };
+                
+                if (cmd.base.command==USBIPLib::USBIP_CMD_SUBMIT &&
+                    cmd.base.direction==USBIPLib::USBIP_DIR_OUT) {
+                    // Set payload length if this is data coming from the host
+                    payload.len = cmd.cmd_submit.transfer_buffer_length;
+                    payload.data = std::make_unique<uint8_t[]>(payload.len);
+                }
+                
+                const bool handled = _handleCmd(lock, cmd);
+                
+                // If we handled the command, there's nothing left to do, so continue
+                // waiting for another command.
+                if (handled) continue;
+                
+                switch (cmd.base.direction) {
+                // OUT command (data from host->device):
+                //   Let the host know we received their data, and return the payload to the caller.
+                case USBIPLib::USBIP_DIR_OUT: {
+                    _reply(lock, cmd, nullptr, 0);
+                    return payload;
+                }
+                
+                // IN command (data from device->host):
+                //   Check whether we have queued data waiting to be sent for the specified endpoint.
+                case USBIPLib::USBIP_DIR_IN: {
+                    const uint8_t epIdx = cmd.base.ep;
+                    if (epIdx >= std::size(_s.inData)) throw RuntimeError("invalid Cmd direction");
+                    auto& epInData = _s.inData[epIdx];
+                    // Send the data if we already have some queued for the IN command
+                    if (!epInData.empty()) {
+                        Data& d = epInData.front();
+                        _reply(lock, cmd, d.data.get(), d.len);
+                        epInData.pop_front();
+                    
+                    // Otherwise, queue the IN command until data is written for the endpoint
+                    } else {
+                        auto& epInCmds = _s.inCmds[epIdx];
+                        epInCmds.push_back(cmd);
+                    }
+                }
+                
+                default:
+                    throw RuntimeError("invalid Cmd direction");
+                }
             }
-        
         } catch (const std::exception& e) {
             _reset(lock, std::current_exception());
             if (_info.throwOnErr) throw;
         }
     }
+    
+    void write(uint8_t ep, void* data, size_t len) {
+        // Must be an IN endpoint
+        assert((ep & USB::Endpoint::DirMask) == USB::Endpoint::DirIn);
+        const uint8_t epIdx = ep&USB::Endpoint::IdxMask;
+        assert(epIdx < std::size(_s.inCmds));
+        auto& epInCmds = _s.inCmds[epIdx];
+        
+        auto lock = std::unique_lock(_s.lock);
+        try {
+            // Bail if there's an error (and therefore we're stopped)
+            if (_s.err) std::rethrow_exception(_s.err);
+            
+            // Send the data immediately if the host has already requested
+            // data for endpoint `ep`
+            if (!epInCmds.empty()) {
+                _reply(lock, epInCmds.front(), data, len);
+                epInCmds.pop_front();
+            
+            // Otherwise, queue the data until the host requests it
+            } else {
+                auto& epInData = _s.inData[epIdx];
+                // Enqueue the data into `epInData`
+                Data d = {
+                    .ep = ep,
+                    .data = std::make_unique<uint8_t[]>(len),
+                    .len = len,
+                };
+                memcpy(d.data.get(), data, len);
+                epInData.push_back(std::move(d));
+            }
+        } catch (const std::exception& e) {
+            _reset(lock, std::current_exception());
+            if (_info.throwOnErr) throw;
+        }
+    }
+    
+    
+    
+    
+//    Cmd read() {
+//        auto lock = std::unique_lock(_s.lock);
+//        try {
+//            for (;;) {
+//                // Bail if there's an error (and therefore we're stopped)
+//                if (_s.err) std::rethrow_exception(_s.err);
+//                // Wait until a message arrives
+//                if (_s.xfers.empty()) {
+//                    _s.signal.wait(lock);
+//                    continue;
+//                }
+//                
+//                Cmd xfer = std::move(_s.xfers.front());
+//                _s.xfers.pop_front();
+//                bool handled = _handleCmd(xfer);
+//                if (!handled) {
+//                    printf("[VirtualUSBDevice] need reply to: %u\n", xfer.cmd.base.seqnum);
+//                    // We need a response, so add the seqnum to replySeqnums
+//                    _s.replySeqnums.insert(xfer.cmd.base.seqnum);
+//                    return xfer;
+//                }
+//            }
+//        
+//        } catch (const std::exception& e) {
+//            _reset(lock, std::current_exception());
+//            if (_info.throwOnErr) throw;
+//            return {};
+//        }
+//    }
+//    
+//    void write() {
+//        auto lock = std::unique_lock(_s.lock);
+//        try {
+//            for (;;) {
+//                // Bail if there's an error (and therefore we're stopped)
+//                if (_s.err) std::rethrow_exception(_s.err);
+//                // Wait until a message arrives
+//                if (_s.xfers.empty()) {
+//                    _s.signal.wait(lock);
+//                    continue;
+//                }
+//                
+//                Cmd xfer = std::move(_s.xfers.front());
+//                _s.xfers.pop_front();
+//                bool handled = _handleCmd(xfer);
+//                if (!handled) {
+//                    printf("[VirtualUSBDevice] need reply to: %u\n", xfer.cmd.base.seqnum);
+//                    // We need a response, so add the seqnum to replySeqnums
+//                    _s.replySeqnums.insert(xfer.cmd.base.seqnum);
+//                    return xfer;
+//                }
+//            }
+//        
+//        } catch (const std::exception& e) {
+//            _reset(lock, std::current_exception());
+//            if (_info.throwOnErr) throw;
+//            return {};
+//        }
+//    }
+    
+//    void reply(const Cmd& cmd, const void* data, size_t len) {
+//        auto lock = std::unique_lock(_s.lock);
+//        try {
+//            // Bail if there's an error (and therefore we're stopped)
+//            if (_s.err) std::rethrow_exception(_s.err);
+//            // Only reply if the seqnum is in `replySeqnums`.
+//            // If it's not, it's been unlinked (or there's a bug in the client)
+//            const size_t count = _s.replySeqnums.erase(xfer.cmd.base.seqnum);
+//            if (count) {
+//                printf("[VirtualUSBDevice] replying to: %u\n", xfer.cmd.base.seqnum);
+//                _reply(xfer, data, len);
+//            } else {
+//                printf("[VirtualUSBDevice] dropping reply: %u\n", xfer.cmd.base.seqnum);
+//            }
+//        
+//        } catch (const std::exception& e) {
+//            printf("[VirtualUSBDevice] replying ERROR: %s\n", e.what());
+//            _reset(lock, std::current_exception());
+//            if (_info.throwOnErr) throw;
+//        }
+//    }
     
     Err err() {
         auto lock = std::unique_lock(_s.lock);
@@ -225,11 +366,31 @@ private:
     static constexpr uint8_t _DeviceID = 1;
     
     struct _State {
-        static constexpr uint8_t Idle          = 0;
-        static constexpr uint8_t ThreadRunning = 1<<0;
-        static constexpr uint8_t ThreadStopped = 1<<1;
-        static constexpr uint8_t Reset         = 1<<2;
+        static constexpr uint8_t Idle           = 0;
+        static constexpr uint8_t Started        = 1<<0;
+        static constexpr uint8_t SocketBusy     = 1<<1;
+        static constexpr uint8_t Reset          = 1<<2;
     };
+    
+    USB::SetupRequest _GetSetupRequest(const Cmd& cmd) const {
+        using namespace Endian;
+        USB::SetupRequest req;
+        memcpy(&req, cmd.cmd_submit.setup.u8, sizeof(req));
+        req = {
+            .bmRequestType  = HFL_U8(req.bmRequestType),
+            .bRequest       = HFL_U8(req.bRequest),
+            .wValue         = HFL_U16(req.wValue),
+            .wIndex         = HFL_U16(req.wIndex),
+            .wLength        = HFL_U16(req.wLength),
+        };
+        return req;
+    }
+    
+    uint8_t _GetEndpointAddr(const Cmd& cmd) {
+        const bool dirIn = cmd.base.direction==USBIPLib::USBIP_DIR_IN;
+        const uint8_t ep = cmd.base.ep | (dirIn ? 0x80 : 0x00);
+        return ep;
+    }
     
     static void _Read(int socket, void* data, size_t len) {
         size_t off = 0;
@@ -257,10 +418,34 @@ private:
         }
     }
     
-    static USBIPCmd _ReadUSBIPCmd(int socket) {
+    void _read(std::unique_lock<std::mutex>& lock, void* data, size_t len) {
+        const int socket = _s.socket;
+        // Mark the socket as busy so that _reset() won't close it until we're done with it
+        _s.state |= _State::SocketBusy;
+        lock.unlock();
+        _Read(socket, data, len);
+        lock.lock();
+        _s.state &= ~_State::SocketBusy;
+        // We re-acquired the lock, so check for errors, and bail if so
+        if (_s.err) std::rethrow_exception(_s.err);
+    }
+    
+    void _write(std::unique_lock<std::mutex>& lock, const void* data, size_t len) {
+        const int socket = _s.socket;
+        // Mark the socket as busy so that _reset() won't close it until we're done with it
+        _s.state |= _State::SocketBusy;
+        lock.unlock();
+        _Write(socket, data, len);
+        lock.lock();
+        _s.state &= ~_State::SocketBusy;
+        // We re-acquired the lock, so check for errors, and bail if so
+        if (_s.err) std::rethrow_exception(_s.err);
+    }
+    
+    Cmd _readCmd(std::unique_lock<std::mutex>& lock) {
         using namespace Endian;
-        USBIPCmd cmd;
-        _Read(socket, &cmd, sizeof(cmd));
+        Cmd cmd;
+        _read(lock, &cmd, sizeof(cmd));
         
         // Big endian -> host endian
         cmd.base = {
@@ -333,56 +518,51 @@ private:
         return bmAttributes & USB::ConfigurationCharacteristics::SelfPowered;
     }
     
-    void _thread() {
-        int socket = -1;
-        // Copy the socket so we can reference it without the lock.
-        // The _reset() logic ensures that the socket won't be closed until this thread exits.
-        auto lock = std::unique_lock(_s.lock);
-        socket = _s.socket;
-        lock.unlock();
-        
-        try {
-            for (;;) {
-                USBIPCmd cmd = _ReadUSBIPCmd(socket);
-                size_t payloadLen = 0;
-                if (cmd.base.command==USBIPLib::USBIP_CMD_SUBMIT && cmd.base.direction==USBIPLib::USBIP_DIR_OUT) {
-                    payloadLen = cmd.cmd_submit.transfer_buffer_length;
-                }
-                
-                Xfer xfer = {
-                    .cmd = cmd,
-                    .payloadLen = payloadLen,
-                };
-                
-                if (xfer.payloadLen) {
-                    xfer.payload = std::make_unique<uint8_t[]>(payloadLen);
-                    _Read(socket, xfer.payload.get(), payloadLen);
-                }
-                
-                lock.lock();
-                _s.xfers.push_back(std::move(xfer));
-                _s.signal.notify_all();
-                lock.unlock();
-            }
-        
-        } catch (const std::exception& e) {
-            lock.lock();
-            _reset(lock, std::current_exception());
-            lock.unlock();
-        }
-        
-        lock.lock();
-        _s.state |= _State::ThreadStopped;
-        _s.signal.notify_all();
-        lock.unlock();
-//        printf("VirtualUSBDevice: thread exiting\n");
-    }
+//    void _thread() {
+//        int socket = -1;
+//        // Copy the socket so we can reference it without the lock.
+//        // The _reset() logic ensures that the socket won't be closed until this thread exits.
+//        auto lock = std::unique_lock(_s.lock);
+//        socket = _s.socket;
+//        lock.unlock();
+//        
+//        try {
+//            for (;;) {
+//                Cmd cmd;
+//                cmd = _ReadUSBIPCmd(socket);
+//                
+//                if (cmd.base.command==USBIPLib::USBIP_CMD_SUBMIT && cmd.base.direction==USBIPLib::USBIP_DIR_OUT) {
+//                    // Set payload length if this is data coming from the host
+//                    cmd.payloadLen = cmd_submit.transfer_buffer_length;
+//                }
+//                
+//                if (cmd.payloadLen) {
+//                    cmd.payload = std::make_unique<uint8_t[]>(payloadLen);
+//                    _Read(socket, cmd.payload.get(), payloadLen);
+//                }
+//                
+//                lock.lock();
+//                _s.cmds.push_back(std::move(cmd));
+//                _s.signal.notify_all();
+//                lock.unlock();
+//            }
+//        
+//        } catch (const std::exception& e) {
+//            lock.lock();
+//            _reset(lock, std::current_exception());
+//            lock.unlock();
+//        }
+//        
+//        lock.lock();
+//        _s.state |= _State::ThreadStopped;
+//        _s.signal.notify_all();
+//        lock.unlock();
+////        printf("VirtualUSBDevice: thread exiting\n");
+//    }
     
     // _s.lock must be held
-    void _reply(const Xfer& xfer, const void* data, size_t len, int32_t status=0) {
+    void _reply(std::unique_lock<std::mutex>& lock, const Cmd& cmd, const void* data, size_t len, int32_t status=0) {
         using namespace Endian;
-        
-        const USBIPCmd& cmd = xfer.cmd;
         uint32_t command = 0;
         switch (cmd.base.command) {
         case USBIPLib::USBIP_CMD_SUBMIT: command = USBIPLib::USBIP_RET_SUBMIT; break;
@@ -390,7 +570,7 @@ private:
         default: throw RuntimeError("invalid cmd.base.command: %u", cmd.base.command);
         }
         
-        const USBIPCmd ret = {
+        const Cmd ret = {
             .base = {
                 .command            = BFH_U32(command),
                 .seqnum             = BFH_U32(cmd.base.seqnum),
@@ -408,38 +588,53 @@ private:
             },
         };
         
-        _Write(_s.socket, &ret, sizeof(ret));
-        _Write(_s.socket, data, len);
+        _write(lock, &ret, sizeof(ret));
+        _write(lock, data, len);
     }
     
     // _s.lock must be held
-    bool _handleXfer(const Xfer& xfer) {
-        switch (xfer.cmd.base.command) {
+    bool _handleCmd(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
+        switch (cmd.base.command) {
         case USBIPLib::USBIP_CMD_SUBMIT: {
             // Endpoint 0
-            if (!xfer.cmd.base.ep) return _handleRequestEP0(xfer);
+            if (!cmd.base.ep) return _handleRequestEP0(lock, cmd);
             // Other endpoints
             else return false;
         }
         
         case USBIPLib::USBIP_CMD_UNLINK: {
-            const size_t count = _s.replySeqnums.erase(xfer.cmd.cmd_unlink.seqnum);
+            printf("UNLINK for endpoint %x (idx=%u) %u\n", _GetEndpointAddr(cmd), cmd.base.ep, cmd.cmd_unlink.seqnum);
+            
+            // TODO: we probably don't need to loop over every deque, just look at `cmd.base.ep`
+            // Remove the IN cmd from the endpoint's inCmds deque
+            bool found = false;
+            for (std::deque<Cmd>& deq : _s.inCmds) {
+                for (auto it=deq.begin(); it!=deq.end(); it++) {
+                    const Cmd& cmd = *it;
+                    if (cmd.base.seqnum == cmd.cmd_unlink.seqnum) {
+                        deq.erase(it);
+                        break;
+                    }
+                }
+                if (found) break;
+            }
+            
             // status = -ECONNRESET on success
-            const int32_t status = (count ? -ECONNRESET : 0);
-            _reply(xfer, nullptr, 0, status);
+            const int32_t status = (found ? -ECONNRESET : 0);
+            _reply(lock, cmd, nullptr, 0, status);
             return true;
         }
         
         default:
-            throw RuntimeError("unknown USBIP command: %u", xfer.cmd.base.command);
+            throw RuntimeError("unknown USBIP command: %u", cmd.base.command);
         }
     }
     
     // _s.lock must be held
-    bool _handleRequestEP0(const Xfer& xfer) {
+    bool _handleRequestEP0(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
         using namespace Endian;
         printf("_handleRequestEP0\n");
-        USB::SetupRequest req = xfer.getSetupRequest();
+        USB::SetupRequest req = _GetSetupRequest(cmd);
         
         const bool standardType =
             (req.bmRequestType & USB::RequestType::TypeMask) == USB::RequestType::TypeStandard;
@@ -460,7 +655,7 @@ private:
             // If self-powered, bit 0 is 1
             if (_SelfPowered(*_s.configDesc)) reply |= 1;
             reply = LFH_U16(reply);
-            _reply(xfer, &reply, sizeof(reply));
+            _reply(lock, cmd, &reply, sizeof(reply));
             return true;
         }
         
@@ -510,7 +705,7 @@ private:
             const int32_t status = (replyData ? 0 : 1);
             // Cap reply length to `wLength` in the original request
             replyDataLen = std::min(replyDataLen, (size_t)req.wLength);
-            _reply(xfer, replyData, replyDataLen, status);
+            _reply(lock, cmd, replyData, replyDataLen, status);
             return true;
         }
         
@@ -528,7 +723,7 @@ private:
             }
             
             if (!ok) throw RuntimeError("invalid Configuration value: %u", configVal);
-            _reply(xfer, nullptr, 0);
+            _reply(lock, cmd, nullptr, 0);
             return true;
         }
         
@@ -547,18 +742,21 @@ private:
         auto sockets = {std::ref(_s.socket), std::ref(_s.usbipSocket)};
         
         // Shutdown sockets
-        // Thread will exit when it sees that the socket is shutdown
+        // read() will exit when it sees that the socket is shutdown
         for (const int& s : sockets) {
             if (s >= 0) {
                 shutdown(s, SHUT_RDWR);
             }
         }
         
-        // Wait for thread to exit
-        if (_s.state & _State::ThreadRunning) {
-            while (!(_s.state & _State::ThreadStopped)) {
-                _s.signal.wait(lock);
-            }
+        // Wait until no one is using the socket
+        while (_s.state & _State::SocketBusy) {
+            // Poll until the socket isn't being used.
+            // Primitive but simple, since this doesn't happen often and it's not
+            // worth adding a condition_variable just for teardown
+            lock.unlock();
+            usleep(1000);
+            lock.lock();
         }
         
         // Close sockets now that the thread has exited
@@ -574,13 +772,14 @@ private:
     
     struct {
         std::mutex lock; // Struct should only be accessed while holding lock
-        std::condition_variable signal;
+//        std::condition_variable signal;
         uint8_t state = _State::Idle;
         Err err;
         int socket = -1;
         int usbipSocket = -1;
         const USB::ConfigurationDescriptor* configDesc = nullptr;
-        std::deque<Xfer> xfers;
-        std::set<uint32_t> replySeqnums;
+        std::deque<Cmd> inCmds[USB::Endpoint::MaxCount];
+        std::deque<Data> inData[USB::Endpoint::MaxCount];
+//        std::set<uint32_t> replySeqnums;
     } _s;
 };

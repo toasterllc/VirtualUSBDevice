@@ -55,6 +55,16 @@ namespace RequestType {
     static constexpr uint8_t RecipientMask              = 0x1F;
 };
 
+namespace Endpoint {
+    static constexpr uint8_t MaxCount                   = 16; // Max number of endpoints
+    
+    static constexpr uint8_t DirIn                      = 0x80;
+    static constexpr uint8_t DirOut                     = 0x00;
+    static constexpr uint8_t DirMask                    = 0x80;
+    
+    static constexpr uint8_t IdxMask                    = 0x0F;
+};
+
 struct DeviceDescriptor {
     uint8_t bLength;
     uint8_t bDescriptorType;
