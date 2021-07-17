@@ -184,15 +184,17 @@ public:
             for (;;) {
                 const Cmd cmd = _readCmd(lock);
                 auto xfer = _handleCmd(lock, cmd);
-                if (xfer) return *xfer;
+                if (xfer) return std::move(*xfer);
             }
+        
         } catch (const std::exception& e) {
             _reset(lock, std::current_exception());
             if (_info.throwOnErr) throw;
+            return {};
         }
     }
     
-    void write(uint8_t ep, void* data, size_t len) {
+    void write(uint8_t ep, const void* data, size_t len) {
         // Must be an IN endpoint
         assert((ep & USB::Endpoint::DirMask) == USB::Endpoint::DirIn);
         const uint8_t epIdx = ep&USB::Endpoint::IdxMask;
@@ -586,7 +588,7 @@ private:
         const size_t payloadLen = cmd.cmd_submit.transfer_buffer_length;
         
         if (payloadLen) {
-            payload = std::make_unique<uint8_t[]>(payload.len);
+            payload = std::make_unique<uint8_t[]>(payloadLen);
             _read(lock, payload.get(), payloadLen);
         }
         
@@ -601,16 +603,21 @@ private:
                 // We shouldn't have a payload for standard requests
                 if (payload) throw RuntimeError("unexpected payload for endpoint 0 standard USB request");
                 _handleStandardSetupRequest(lock, cmd, setupReq);
+                return std::nullopt;
             
             // Otherwise, return the transfer to the caller
             } else {
+                // The caller needs to reply by calling write(), so update _s.inCmds.
+                auto& epInCmds = _s.inCmds[epIdx];
+                epInCmds.push_back(cmd);
+                
                 // No _reply() here -- since this is the default control endpoint,
                 // the caller needs to write() the reply.
                 return Xfer{
-                    .ep = _GetEndpointAddr(cmd),
-                    .setup = setupReq,
-                    .data = std::move(payload),
-                    .len = payloadLen,
+                    .ep         = _GetEndpointAddr(cmd),
+                    .setupReq   = setupReq,
+                    .data       = std::move(payload),
+                    .len        = payloadLen,
                 };
             }
         
@@ -624,7 +631,6 @@ private:
                 .len = payloadLen,
             };
         }
-        return std::nullopt;
     }
     
     void _handleCmdSubmitIn(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
@@ -634,7 +640,7 @@ private:
         auto& epInData = _s.inData[epIdx];
         // Send the data if we already have some queued for the IN command
         if (!epInData.empty()) {
-            Data& d = epInData.front();
+            _Data& d = epInData.front();
             _reply(lock, cmd, d.data.get(), d.len);
             epInData.pop_front();
         
@@ -955,7 +961,7 @@ private:
         int usbipSocket = -1;
         const USB::ConfigurationDescriptor* configDesc = nullptr;
         std::deque<Cmd> inCmds[USB::Endpoint::MaxCount];
-        std::deque<Data> inData[USB::Endpoint::MaxCount];
+        std::deque<_Data> inData[USB::Endpoint::MaxCount];
 //        std::set<uint32_t> replySeqnums;
     } _s;
 };

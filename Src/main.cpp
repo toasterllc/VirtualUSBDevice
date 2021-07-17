@@ -8,14 +8,13 @@ static USB::CDC::LineCoding LineCoding = {};
 static struct {
     std::mutex lock;
     std::condition_variable signal;
-    std::deque<VirtualUSBDevice::Data> queue;
     bool dtePresent = false;
-} _Datas;
+} _State;
 
-static void _handleRequestEP0(VirtualUSBDevice& dev, VirtualUSBDevice::Data&& data) {
-    const USB::SetupRequest req = xfer.getSetupRequest();
-    const uint8_t* payload = xfer.payload.get();
-    const size_t payloadLen = xfer.payloadLen;
+static void _handleXferEP0(VirtualUSBDevice& dev, VirtualUSBDevice::Xfer&& xfer) {
+    const USB::SetupRequest req = xfer.setupReq;
+    const uint8_t* payload = xfer.data.get();
+    const size_t payloadLen = xfer.len;
     
     // Verify that this is a Class request intended for an Interface
     if (req.bmRequestType != (USB::RequestType::TypeClass|USB::RequestType::RecipientInterface))
@@ -39,27 +38,24 @@ static void _handleRequestEP0(VirtualUSBDevice& dev, VirtualUSBDevice::Data&& da
         printf("  bCharFormat: %08x\n", LineCoding.bCharFormat);
         printf("  bParityType: %08x\n", LineCoding.bParityType);
         printf("  bDataBits: %08x\n", LineCoding.bDataBits);
-        return d.reply(xfer, nullptr, 0);
+        return dev.write(USB::Endpoint::DefaultIn, nullptr, 0);
     }
     
     case USB::CDC::Request::GET_LINE_CODING: {
         printf("GET_LINE_CODING\n");
         if (payloadLen != sizeof(LineCoding))
             throw RuntimeError("SET_LINE_CODING: payloadLen doesn't match sizeof(USB::CDC::LineCoding)");
-        return d.reply(xfer, &LineCoding, sizeof(LineCoding));
+        return dev.write(USB::Endpoint::DefaultIn, &LineCoding, sizeof(LineCoding));
     }
     
     case USB::CDC::Request::SET_CONTROL_LINE_STATE: {
         const bool dtePresent = req.wValue&1;
         printf("SET_CONTROL_LINE_STATE:\n");
         printf("  dtePresent=%d\n", dtePresent);
-        auto lock = std::unique_lock(_Datas.lock);
-        _Datas.dtePresent = dtePresent;
-        if (!_Datas.dtePresent) {
-            _Datas.queue.clear();
-        }
-        _Datas.signal.notify_all();
-        return d.reply(xfer, nullptr, 0);
+        auto lock = std::unique_lock(_State.lock);
+        _State.dtePresent = dtePresent;
+        _State.signal.notify_all();
+        return dev.write(USB::Endpoint::DefaultIn, nullptr, 0);
     }
     
     default:
@@ -67,78 +63,39 @@ static void _handleRequestEP0(VirtualUSBDevice& dev, VirtualUSBDevice::Data&& da
     }
 }
 
-static bool _handleRequestEPX(VirtualUSBDevice& dev, VirtualUSBDevice::Data&& data) {
-    const uint8_t ep = xfer.getEndpointAddress();
-//    const uint8_t* payload = xfer.payload.get();
-//    const size_t payloadLen = xfer.payloadLen;
-    
-    switch (ep) {
-    case Endpoint::In1: {
-        printf("Endpoint::In1\n");
-        auto lock = std::unique_lock(_Datas.lock);
-        _Datas.queue.push_back(std::move(xfer));
-        _Datas.signal.notify_all();
-        break;
-    }
-    
-    case Endpoint::In2: {
-        printf("Endpoint::In2\n");
-        auto lock = std::unique_lock(_Datas.lock);
-        _Datas.queue.push_back(std::move(xfer));
-        _Datas.signal.notify_all();
-        break;
-    }
-    
+static void _handleXferEPX(VirtualUSBDevice& dev, VirtualUSBDevice::Xfer&& xfer) {
+    switch (xfer.ep) {
     case Endpoint::Out2: {
-        printf("Endpoint::Out2\n");
-        d.reply(xfer, nullptr, 0);
+        printf("Endpoint::Out2: <");
+        for (size_t i=0; i<xfer.len; i++) {
+            printf(" %02x", xfer.data[i]);
+        }
+        printf(" >\n\n");
         break;
     }
     
     default:
-        throw RuntimeError("invalid endpoint: %02x", ep);
+        throw RuntimeError("invalid endpoint: 0x%02x", xfer.ep);
     }
-    
-    return true;
 }
 
-static void _handleData(VirtualUSBDevice& dev, VirtualUSBDevice::Data&& data) {
+static void _handleXfer(VirtualUSBDevice& dev, VirtualUSBDevice::Xfer&& xfer) {
     // Endpoint 0
-    if (!xfer.cmd.base.ep) _handleRequestEP0(d, std::move(data));
+    if (xfer.ep == 0) _handleXferEP0(dev, std::move(xfer));
     // Other endpoints
-    else _handleRequestEPX(d, std::move(data));
+    else _handleXferEPX(dev, std::move(xfer));
 }
 
 static void _threadResponse(VirtualUSBDevice& dev) {
     for (;;) {
-        auto lock = std::unique_lock(_Datas.lock);
-        while (!_Datas.dtePresent || _Datas.queue.empty()) {
-            _Datas.signal.wait(lock);
+        auto lock = std::unique_lock(_State.lock);
+        while (!_State.dtePresent) {
+            _State.signal.wait(lock);
         }
-        
-        VirtualUSBDevice::Data xfer = std::move(_Datas.queue.front());
-        _Datas.queue.pop_front();
         lock.unlock();
         
-        const uint8_t ep = xfer.getEndpointAddress();
-        switch (ep) {
-        case Endpoint::In1: {
-            printf("_threadResponse: replied to Endpoint::In1\n");
-            d.reply(xfer, nullptr, 0);
-            break;
-        }
-        
-        case Endpoint::In2: {
-            printf("_threadResponse: replied to Endpoint::In2\n");
-            char text[] = "Testing\r\n";
-            d.reply(xfer, text, strlen(text));
-            break;
-        }
-        
-        default:
-            abort();
-        }
-        
+        const char text[] = "Testing 123\r\n";
+        dev.write(Endpoint::In2, text, strlen(text));
         usleep(500000);
     }
 }
@@ -182,14 +139,14 @@ int main(int argc, const char* argv[]) {
 //        }).detach();
         
         for (;;) {
-            VirtualUSBDevice::Data data = dev.read();
-            _handleData(dev, std::move(data));
+            VirtualUSBDevice::Xfer data = dev.read();
+            _handleXfer(dev, std::move(data));
         }
         
     } catch (const std::exception& e) {
         fprintf(stderr, "Error: %s\n", e.what());
         // Using _exit to avoid calling destructors for static vars, since that hangs
-        // in __pthread_cond_destroy, because our thread is sitting in _Datas.signal.wait()
+        // in __pthread_cond_destroy, because our thread is sitting in _State.signal.wait()
         _exit(1);
     }
     

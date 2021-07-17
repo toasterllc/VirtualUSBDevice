@@ -57,6 +57,8 @@ namespace RequestType {
 
 namespace Endpoint {
     static constexpr uint8_t MaxCount                   = 16; // Max number of endpoints
+    static constexpr uint8_t DefaultOut                 = 0x00;
+    static constexpr uint8_t DefaultIn                  = 0x80;
     
     static constexpr uint8_t DirIn                      = 0x80;
     static constexpr uint8_t DirOut                     = 0x00;
