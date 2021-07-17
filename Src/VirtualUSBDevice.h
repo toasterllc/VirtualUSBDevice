@@ -228,8 +228,8 @@ public:
             if (_s.err) std::rethrow_exception(_s.err);
             for (;;) {
                 const Cmd cmd = _readCmd(lock);
-                printf("Got cmd: ");
-                _PrintCmd(cmd);
+//                printf("Got cmd: ");
+//                _PrintCmd(cmd);
                 auto xfer = _handleCmd(lock, cmd);
                 if (xfer) return std::move(*xfer);
             }
@@ -604,17 +604,10 @@ private:
     std::optional<Xfer> _handleCmd(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
         switch (cmd.base.command) {
         case USBIPLib::USBIP_CMD_SUBMIT:
-            switch (cmd.base.direction) {
-            // OUT command (data from host->device)
-            case USBIPLib::USBIP_DIR_OUT:
-                return _handleCmdSubmitOut(lock, cmd);
-            
-            // IN command (data from device->host)
-            case USBIPLib::USBIP_DIR_IN:
-                return _handleCmdSubmitIn(lock, cmd);
-            
-            default:
-                throw RuntimeError("invalid Cmd direction");
+            if (cmd.base.ep == 0) {
+                return _handleCmdSubmitEP0(lock, cmd);
+            } else {
+                return _handleCmdSubmitEPX(lock, cmd);
             }
         
         case USBIPLib::USBIP_CMD_UNLINK:
@@ -626,12 +619,58 @@ private:
         }
     }
     
-    Xfer _handleCmdSubmitOut(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
+    std::optional<Xfer> _handleCmdSubmitEP0(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
         printf("_handleCmdSubmitOut\n");
+        const USB::SetupRequest setupReq = _GetSetupRequest(cmd);
+        const bool standardType =
+            (setupReq.bmRequestType & USB::RequestType::TypeMask) == USB::RequestType::TypeStandard;
+        
+        // Handle standard requests
+        if (standardType) {
+//                // We shouldn't have a payload for standard requests
+//                if (payload) throw RuntimeError("unexpected payload for endpoint 0 standard USB request");
+            _handleCmdSubmitEP0StandardRequest(lock, cmd, setupReq);
+            return std::nullopt;
+        
+        // Otherwise, handle as a regular endpoint command
+        } else {
+            auto xfer = _handleCmdSubmitEPX(lock, cmd);
+            // Populate the setupReq member, since it's always expected for ep==0
+            if (xfer) xfer->setupReq = setupReq;
+            return xfer;
+//            // The caller needs to reply by calling write(), so update _s.inCmds.
+//            auto& epInCmds = _s.inCmds[epIdx];
+//            epInCmds.push_back(cmd);
+//            
+//            // No _reply() here -- since this is the default control endpoint,
+//            // the caller needs to write() the reply.
+//            return Xfer{
+//                .ep         = _GetEndpointAddr(cmd),
+//                .setupReq   = setupReq,
+//            };
+        }
+    }
+    
+    std::optional<Xfer> _handleCmdSubmitEPX(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
+        switch (cmd.base.direction) {
+        // OUT command (data from host->device)
+        case USBIPLib::USBIP_DIR_OUT:
+            return _handleCmdSubmitEPXOut(lock, cmd);
+        
+        // IN command (data from device->host)
+        case USBIPLib::USBIP_DIR_IN:
+            _handleCmdSubmitEPXIn(lock, cmd);
+            return std::nullopt;
+        
+        default:
+            throw RuntimeError("invalid Cmd direction");
+        }
+    }
+    
+    Xfer _handleCmdSubmitEPXOut(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
+        printf("_handleCmdSubmitEPXOut\n");
         const uint8_t epIdx = cmd.base.ep;
-//        if (epIdx == 0) throw RuntimeError("unexpected OUT transfer for endpoint 0");
         if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
-        const USB::SetupRequest setupReq = (epIdx==0 ? _GetSetupRequest(cmd) : USB::SetupRequest{});
         
         std::unique_ptr<uint8_t[]> payload;
         const size_t payloadLen = cmd.cmd_submit.transfer_buffer_length;
@@ -645,66 +684,33 @@ private:
         _reply(lock, cmd, nullptr, 0);
         return Xfer{
             .ep         = _GetEndpointAddr(cmd),
-            .setupReq   = setupReq,
             .data       = std::move(payload),
             .len        = payloadLen,
         };
     }
     
-    std::optional<Xfer> _handleCmdSubmitIn(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
-        printf("_handleCmdSubmitIn\n");
+    void _handleCmdSubmitEPXIn(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
+        printf("_handleCmdSubmitEPXIn\n");
         const uint8_t epIdx = cmd.base.ep;
         if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
+        auto& epInData = _s.inData[epIdx];
         
-        // Handle default control endpoint
-        if (epIdx == 0) {
-            const USB::SetupRequest setupReq = _GetSetupRequest(cmd);
-            const bool standardType =
-                (setupReq.bmRequestType & USB::RequestType::TypeMask) == USB::RequestType::TypeStandard;
-            
-            // We handle all standard requests
-            if (standardType) {
-//                // We shouldn't have a payload for standard requests
-//                if (payload) throw RuntimeError("unexpected payload for endpoint 0 standard USB request");
-                _handleStandardSetupRequest(lock, cmd, setupReq);
-                return std::nullopt;
-            
-            // Otherwise, return the transfer to the caller
-            } else {
-                // The caller needs to reply by calling write(), so update _s.inCmds.
-                auto& epInCmds = _s.inCmds[epIdx];
-                epInCmds.push_back(cmd);
-                
-                // No _reply() here -- since this is the default control endpoint,
-                // the caller needs to write() the reply.
-                return Xfer{
-                    .ep         = _GetEndpointAddr(cmd),
-                    .setupReq   = setupReq,
-                };
-            }
+        // Send the data if we already have some queued for the IN command
+        if (!epInData.empty()) {
+            _Data& d = epInData.front();
+            _reply(lock, cmd, d.data.get(), d.len);
+            epInData.pop_front();
         
-        // All other endpoints
+        // Otherwise, queue the IN command until data is written for the endpoint
         } else {
-            auto& epInData = _s.inData[epIdx];
-            // Send the data if we already have some queued for the IN command
-            if (!epInData.empty()) {
-                _Data& d = epInData.front();
-                _reply(lock, cmd, d.data.get(), d.len);
-                epInData.pop_front();
-            
-//            // Otherwise, reply that we don't have any data
-//            } else {
-//                _reply(lock, cmd, nullptr, 0);
-//            }
-            
-            // Otherwise, queue the IN command until data is written for the endpoint
-            } else {
-                auto& epInCmds = _s.inCmds[epIdx];
-                epInCmds.push_back(cmd);
-            }
-            
-            return std::nullopt;
+            auto& epInCmds = _s.inCmds[epIdx];
+            epInCmds.push_back(cmd);
         }
+        
+//        // Otherwise, reply that we don't have any data
+//        } else {
+//            _reply(lock, cmd, nullptr, 0);
+//        }
     }
     
     void _handleCmdUnlink(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
@@ -713,18 +719,20 @@ private:
         if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
         printf("UNLINK for endpoint %x (idx=%u) %u\n", _GetEndpointAddr(cmd), cmd.base.ep, cmd.cmd_unlink.seqnum);
         
-        // TODO: we probably don't need to loop over every deque, just look at `cmd.base.ep`
         // Remove the IN cmd from the endpoint's inCmds deque
         bool found = false;
+        int i = 0;
         for (std::deque<Cmd>& deq : _s.inCmds) {
             for (auto it=deq.begin(); it!=deq.end(); it++) {
-                const Cmd& cmd = *it;
-                if (cmd.base.seqnum == cmd.cmd_unlink.seqnum) {
+                const Cmd& inCmd = *it;
+                if (inCmd.base.seqnum == cmd.cmd_unlink.seqnum) {
+                    printf("FOUND @ i=%d\n", i);
                     deq.erase(it);
                     break;
                 }
             }
             if (found) break;
+            i++;
         }
         
         // status = -ECONNRESET on success
@@ -771,9 +779,10 @@ private:
 //    }
     
     // _s.lock must be held
-    void _handleStandardSetupRequest(std::unique_lock<std::mutex>& lock, const Cmd& cmd, const USB::SetupRequest& req) {
+    // TODO: rename
+    void _handleCmdSubmitEP0StandardRequest(std::unique_lock<std::mutex>& lock, const Cmd& cmd, const USB::SetupRequest& req) {
         using namespace Endian;
-        printf("_handleStandardSetupRequest\n");
+        printf("_handleCmdSubmitEP0StandardRequest\n");
 //        USB::SetupRequest req = _GetSetupRequest(cmd);
 //        
 //        const bool standardType =
@@ -787,88 +796,125 @@ private:
         if (recipient != USB::RequestType::RecipientDevice)
             throw RuntimeError("invalid recipient: %u", recipient);
         
-        switch (req.bRequest) {
-        case USB::Request::GetStatus: {
-            printf("USB::Request::GetStatus\n");
-            if (!_s.configDesc) throw RuntimeError("no active configuration");
-            uint16_t reply = 0;
-            // If self-powered, bit 0 is 1
-            if (_SelfPowered(*_s.configDesc)) reply |= 1;
-            reply = LFH_U16(reply);
-            _reply(lock, cmd, &reply, sizeof(reply));
-            return;
-        }
-        
-        case USB::Request::GetDescriptor: {
-            const uint8_t descType = (req.wValue&0xFF00)>>8;
-            const uint8_t descIdx = (req.wValue&0x00FF)>>0;
-            const void* replyData = nullptr;
-            size_t replyDataLen = 0;
+        switch (cmd.base.direction) {
+        // IN command (data from device->host)
+        case USBIPLib::USBIP_DIR_IN: {
+            switch (req.bRequest) {
+            case USB::Request::GetStatus: {
+                printf("USB::Request::GetStatus\n");
+                if (!_s.configDesc) throw RuntimeError("no active configuration");
+                uint16_t reply = 0;
+                // If self-powered, bit 0 is 1
+                if (_SelfPowered(*_s.configDesc)) reply |= 1;
+                reply = LFH_U16(reply);
+                _reply(lock, cmd, &reply, sizeof(reply));
+                return;
+            }
             
-            switch (descType) {
-            case USB::DescriptorType::Device:
-                printf("USB::Request::GetDescriptor::Device\n");
-                replyData = _info.deviceDesc;
-                replyDataLen = _DescLen(*_info.configDescs[descIdx]);
-                break;
-            
-            case USB::DescriptorType::Configuration:
-                printf("USB::Request::GetDescriptor::Configuration\n");
-                if (descIdx >= _info.configDescsCount)
-                    throw RuntimeError("invalid Configuration descriptor index: %u", descIdx);
-                replyData = _info.configDescs[descIdx];
-                replyDataLen = _DescLen(*_info.configDescs[descIdx]);
-                break;
-            
-            case USB::DescriptorType::String:
-                printf("USB::Request::GetDescriptor::String\n");
-                assert(_info.stringDescs); // TODO: handle not having a stringDescs, since it's not required
-                if (descIdx >= _info.stringDescsCount)
-                    throw RuntimeError("invalid String descriptor index: %u", descIdx);
-                replyData = _info.stringDescs[descIdx];
-                replyDataLen = _DescLen(*_info.stringDescs[descIdx]);
-                break;
-            
-            case USB::DescriptorType::DeviceQualifier:
-                printf("USB::Request::GetDescriptor::DeviceQualifier\n");
-                if (_info.deviceQualifierDesc) {
-                    replyData = _info.deviceQualifierDesc;
-                    replyDataLen = _DescLen(*_info.deviceQualifierDesc);
+            case USB::Request::GetDescriptor: {
+                const uint8_t descType = (req.wValue&0xFF00)>>8;
+                const uint8_t descIdx = (req.wValue&0x00FF)>>0;
+                const void* replyData = nullptr;
+                size_t replyDataLen = 0;
+                
+                switch (descType) {
+                case USB::DescriptorType::Device:
+                    printf("USB::Request::GetDescriptor::Device\n");
+                    replyData = _info.deviceDesc;
+                    replyDataLen = _DescLen(*_info.configDescs[descIdx]);
+                    break;
+                
+                case USB::DescriptorType::Configuration:
+                    printf("USB::Request::GetDescriptor::Configuration\n");
+                    if (descIdx >= _info.configDescsCount)
+                        throw RuntimeError("invalid Configuration descriptor index: %u", descIdx);
+                    replyData = _info.configDescs[descIdx];
+                    replyDataLen = _DescLen(*_info.configDescs[descIdx]);
+                    break;
+                
+                case USB::DescriptorType::String:
+                    printf("USB::Request::GetDescriptor::String\n");
+                    assert(_info.stringDescs); // TODO: handle not having a stringDescs, since it's not required
+                    if (descIdx >= _info.stringDescsCount)
+                        throw RuntimeError("invalid String descriptor index: %u", descIdx);
+                    replyData = _info.stringDescs[descIdx];
+                    replyDataLen = _DescLen(*_info.stringDescs[descIdx]);
+                    break;
+                
+                case USB::DescriptorType::DeviceQualifier:
+                    printf("USB::Request::GetDescriptor::DeviceQualifier\n");
+                    if (_info.deviceQualifierDesc) {
+                        replyData = _info.deviceQualifierDesc;
+                        replyDataLen = _DescLen(*_info.deviceQualifierDesc);
+                    }
+                    break;
+                
+                default:
+                    // Unsupported descriptor type
+                    break;
                 }
-                break;
+                
+                const int32_t status = (replyData ? 0 : 1);
+                // Cap reply length to `wLength` in the original request
+                replyDataLen = std::min(replyDataLen, (size_t)req.wLength);
+                _reply(lock, cmd, replyData, replyDataLen, status);
+                return;
+            }
+            
+            case USB::Request::SetConfiguration: {
+                printf("USB::Request::SetConfiguration\n");
+                const uint8_t configVal = (req.wValue&0x00FF)>>0;
+                
+                bool ok = false;
+                for (size_t i=0; i<_info.configDescsCount && !ok; i++) {
+                    const USB::ConfigurationDescriptor& configDesc = *_info.configDescs[i];
+                    if (_ConfigVal(configDesc) == configVal) {
+                        _s.configDesc = &configDesc;
+                        ok = true;
+                    }
+                }
+                
+                if (!ok) throw RuntimeError("invalid Configuration value: %u", configVal);
+                _reply(lock, cmd, nullptr, 0);
+                return;
+            }
             
             default:
-                // Unsupported descriptor type
-                break;
+                throw RuntimeError("invalid device->host standard request: %u", req.bRequest);
             }
-            
-            const int32_t status = (replyData ? 0 : 1);
-            // Cap reply length to `wLength` in the original request
-            replyDataLen = std::min(replyDataLen, (size_t)req.wLength);
-            _reply(lock, cmd, replyData, replyDataLen, status);
-            return;
         }
         
-        case USB::Request::SetConfiguration: {
-            printf("USB::Request::SetConfiguration\n");
-            const uint8_t configVal = (req.wValue&0x00FF)>>0;
+        // OUT command (data from host->device)
+        case USBIPLib::USBIP_DIR_OUT: {
+            const size_t payloadLen = cmd.cmd_submit.transfer_buffer_length;
+            if (payloadLen) throw RuntimeError("unexpected payload for EP0 standard request");
             
-            bool ok = false;
-            for (size_t i=0; i<_info.configDescsCount && !ok; i++) {
-                const USB::ConfigurationDescriptor& configDesc = *_info.configDescs[i];
-                if (_ConfigVal(configDesc) == configVal) {
-                    _s.configDesc = &configDesc;
-                    ok = true;
+            switch (req.bRequest) {
+            case USB::Request::SetConfiguration: {
+                printf("USB::Request::SetConfiguration\n");
+                const uint8_t configVal = (req.wValue&0x00FF)>>0;
+                
+                bool ok = false;
+                for (size_t i=0; i<_info.configDescsCount && !ok; i++) {
+                    const USB::ConfigurationDescriptor& configDesc = *_info.configDescs[i];
+                    if (_ConfigVal(configDesc) == configVal) {
+                        _s.configDesc = &configDesc;
+                        ok = true;
+                    }
                 }
+                
+                if (!ok) throw RuntimeError("invalid Configuration value: %u", configVal);
+                _reply(lock, cmd, nullptr, 0);
+                return;
             }
             
-            if (!ok) throw RuntimeError("invalid Configuration value: %u", configVal);
-            _reply(lock, cmd, nullptr, 0);
-            return;
+            default:
+                throw RuntimeError("invalid host->device standard request: %u", req.bRequest);
+            }
         }
         
         default:
-            throw RuntimeError("invalid DeviceToHostStandardRequest: %u", req.bRequest);
+            throw RuntimeError("invalid Cmd direction");
         }
     }
     
