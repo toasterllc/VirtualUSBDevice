@@ -629,8 +629,9 @@ private:
     Xfer _handleCmdSubmitOut(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
         printf("_handleCmdSubmitOut\n");
         const uint8_t epIdx = cmd.base.ep;
-        if (epIdx == 0) throw RuntimeError("unexpected OUT transfer for endpoint 0");
+//        if (epIdx == 0) throw RuntimeError("unexpected OUT transfer for endpoint 0");
         if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
+        const USB::SetupRequest setupReq = (epIdx==0 ? _GetSetupRequest(cmd) : USB::SetupRequest{});
         
         std::unique_ptr<uint8_t[]> payload;
         const size_t payloadLen = cmd.cmd_submit.transfer_buffer_length;
@@ -643,9 +644,10 @@ private:
         // Let host know that we received the data
         _reply(lock, cmd, nullptr, 0);
         return Xfer{
-            .ep = _GetEndpointAddr(cmd),
-            .data = std::move(payload),
-            .len = payloadLen,
+            .ep         = _GetEndpointAddr(cmd),
+            .setupReq   = setupReq,
+            .data       = std::move(payload),
+            .len        = payloadLen,
         };
     }
     
