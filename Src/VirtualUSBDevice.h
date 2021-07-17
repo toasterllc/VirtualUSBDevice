@@ -717,23 +717,22 @@ private:
         printf("_handleCmdUnlink\n");
         const uint8_t epIdx = cmd.base.ep;
         if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
-        printf("UNLINK for endpoint %x (idx=%u) %u\n", _GetEndpointAddr(cmd), cmd.base.ep, cmd.cmd_unlink.seqnum);
         
         // Remove the IN cmd from the endpoint's inCmds deque
         bool found = false;
-        int i = 0;
         for (std::deque<Cmd>& deq : _s.inCmds) {
             for (auto it=deq.begin(); it!=deq.end(); it++) {
                 const Cmd& inCmd = *it;
                 if (inCmd.base.seqnum == cmd.cmd_unlink.seqnum) {
-                    printf("FOUND @ i=%d\n", i);
                     deq.erase(it);
+                    found = true;
                     break;
                 }
             }
             if (found) break;
-            i++;
         }
+        
+        printf("UNLINK seqnum=%u: %d\n", cmd.cmd_unlink.seqnum, found);
         
         // status = -ECONNRESET on success
         const int32_t status = (found ? -ECONNRESET : 0);
