@@ -38,6 +38,51 @@ public:
         size_t len = 0;
     };
     
+    void _PrintCmd(const Cmd& cmd) const {
+        printf("Cmd{\n");
+        printf("  command                 = %x\n", cmd.base.command);
+        printf("  seqnum                  = %x\n", cmd.base.seqnum);
+        printf("  devid                   = %x\n", cmd.base.devid);
+        printf("  direction               = %x\n", cmd.base.direction);
+        printf("  ep                      = %x\n", cmd.base.ep);
+        printf("\n");
+        
+        switch (cmd.base.command) {
+        case USBIPLib::USBIP_CMD_SUBMIT:
+            printf("  transfer_flags          = %x\n", cmd.cmd_submit.transfer_flags);
+            printf("  transfer_buffer_length  = %x\n", cmd.cmd_submit.transfer_buffer_length);
+            printf("  start_frame             = %x\n", cmd.cmd_submit.start_frame);
+            printf("  number_of_packets       = %x\n", cmd.cmd_submit.number_of_packets);
+            printf("  interval                = %x\n", cmd.cmd_submit.interval);
+            printf("  setup                   = %jx\n", (uintmax_t)cmd.cmd_submit.setup.u64);
+            printf("\n");
+            break;
+        
+        case USBIPLib::USBIP_RET_SUBMIT:
+            printf("  status                  = %x\n", cmd.ret_submit.status);
+            printf("  actual_length           = %x\n", cmd.ret_submit.actual_length);
+            printf("  start_frame             = %x\n", cmd.ret_submit.start_frame);
+            printf("  number_of_packets       = %x\n", cmd.ret_submit.number_of_packets);
+            printf("  error_count             = %x\n", cmd.ret_submit.error_count);
+            printf("\n");
+            break;
+        
+        case USBIPLib::USBIP_CMD_UNLINK:
+            printf("  seqnum                  = %x\n", cmd.cmd_unlink.seqnum);
+            printf("\n");
+            break;
+        
+        case USBIPLib::USBIP_RET_UNLINK:
+            printf("  status                  = %x\n", cmd.ret_unlink.status);
+            printf("\n");
+            break;
+        
+        default:
+            throw RuntimeError("unknown USBIP command: %u", cmd.base.command);
+        }
+    }
+
+    
 //    struct Cmd {
 //        USBIPCmd cmd = {};
 //        
@@ -183,6 +228,8 @@ public:
             if (_s.err) std::rethrow_exception(_s.err);
             for (;;) {
                 const Cmd cmd = _readCmd(lock);
+                printf("Got cmd: ");
+//                _PrintCmd(cmd);
                 auto xfer = _handleCmd(lock, cmd);
                 if (xfer) return std::move(*xfer);
             }
@@ -581,6 +628,7 @@ private:
     }
     
     std::optional<Xfer> _handleCmdSubmitOut(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
+        printf("_handleCmdSubmitOut\n");
         const uint8_t epIdx = cmd.base.ep;
         if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
         
@@ -607,9 +655,9 @@ private:
             
             // Otherwise, return the transfer to the caller
             } else {
-                // The caller needs to reply by calling write(), so update _s.inCmds.
-                auto& epInCmds = _s.inCmds[epIdx];
-                epInCmds.push_back(cmd);
+//                // The caller needs to reply by calling write(), so update _s.inCmds.
+//                auto& epInCmds = _s.inCmds[epIdx];
+//                epInCmds.push_back(cmd);
                 
                 // No _reply() here -- since this is the default control endpoint,
                 // the caller needs to write() the reply.
@@ -634,8 +682,9 @@ private:
     }
     
     void _handleCmdSubmitIn(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
+        printf("_handleCmdSubmitIn\n");
         const uint8_t epIdx = cmd.base.ep;
-        if (epIdx == 0) throw RuntimeError("unexpected IN transfer for endpoint 0");
+//        if (epIdx == 0) throw RuntimeError("unexpected IN transfer for endpoint 0");
         if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
         auto& epInData = _s.inData[epIdx];
         // Send the data if we already have some queued for the IN command
@@ -644,14 +693,20 @@ private:
             _reply(lock, cmd, d.data.get(), d.len);
             epInData.pop_front();
         
-        // Otherwise, queue the IN command until data is written for the endpoint
+        // Otherwise, reply that we don't have any data
         } else {
-            auto& epInCmds = _s.inCmds[epIdx];
-            epInCmds.push_back(cmd);
+            _reply(lock, cmd, nullptr, 0);
         }
+        
+//        // Otherwise, queue the IN command until data is written for the endpoint
+//        } else {
+//            auto& epInCmds = _s.inCmds[epIdx];
+//            epInCmds.push_back(cmd);
+//        }
     }
     
     void _handleCmdUnlink(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
+        printf("_handleCmdUnlink\n");
         const uint8_t epIdx = cmd.base.ep;
         if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
         printf("UNLINK for endpoint %x (idx=%u) %u\n", _GetEndpointAddr(cmd), cmd.base.ep, cmd.cmd_unlink.seqnum);
