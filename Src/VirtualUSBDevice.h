@@ -203,7 +203,14 @@ public:
                 // OUT command (data from host->device):
                 //   Let the host know we received their data, and return the payload to the caller.
                 case USBIPLib::USBIP_DIR_OUT: {
-                    _reply(lock, cmd, nullptr, 0);
+                    // TODO: if this is endpoint 0, we need to copy the request from 
+                    if (cmd.base.ep == 0) {
+                        
+                    // Otherwise, 
+                    } else {
+                        _reply(lock, cmd, nullptr, 0);
+                    }
+                    
                     return payload;
                 }
                 
@@ -211,7 +218,9 @@ public:
                 //   Check whether we have queued data waiting to be sent for the specified endpoint.
                 case USBIPLib::USBIP_DIR_IN: {
                     const uint8_t epIdx = cmd.base.ep;
+                    if (epIdx == 0) throw RuntimeError("unexpected IN transfer for endpoint 0");
                     if (epIdx >= std::size(_s.inData)) throw RuntimeError("invalid Cmd direction");
+                    
                     auto& epInData = _s.inData[epIdx];
                     // Send the data if we already have some queued for the IN command
                     if (!epInData.empty()) {
@@ -597,7 +606,7 @@ private:
         switch (cmd.base.command) {
         case USBIPLib::USBIP_CMD_SUBMIT: {
             // Endpoint 0
-            if (!cmd.base.ep) return _handleRequestEP0(lock, cmd);
+            if (cmd.base.ep == 0) return _handleRequestEP0(lock, cmd);
             // Other endpoints
             else return false;
         }

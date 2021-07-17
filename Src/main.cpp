@@ -8,11 +8,11 @@ static USB::CDC::LineCoding LineCoding = {};
 static struct {
     std::mutex lock;
     std::condition_variable signal;
-    std::deque<VirtualUSBDevice::Xfer> queue;
+    std::deque<VirtualUSBDevice::Data> queue;
     bool dtePresent = false;
-} _Xfers;
+} _Datas;
 
-static void _handleRequestEP0(VirtualUSBDevice& d, VirtualUSBDevice::Xfer&& xfer) {
+static void _handleRequestEP0(VirtualUSBDevice& dev, VirtualUSBDevice::Data&& data) {
     const USB::SetupRequest req = xfer.getSetupRequest();
     const uint8_t* payload = xfer.payload.get();
     const size_t payloadLen = xfer.payloadLen;
@@ -53,12 +53,12 @@ static void _handleRequestEP0(VirtualUSBDevice& d, VirtualUSBDevice::Xfer&& xfer
         const bool dtePresent = req.wValue&1;
         printf("SET_CONTROL_LINE_STATE:\n");
         printf("  dtePresent=%d\n", dtePresent);
-        auto lock = std::unique_lock(_Xfers.lock);
-        _Xfers.dtePresent = dtePresent;
-        if (!_Xfers.dtePresent) {
-            _Xfers.queue.clear();
+        auto lock = std::unique_lock(_Datas.lock);
+        _Datas.dtePresent = dtePresent;
+        if (!_Datas.dtePresent) {
+            _Datas.queue.clear();
         }
-        _Xfers.signal.notify_all();
+        _Datas.signal.notify_all();
         return d.reply(xfer, nullptr, 0);
     }
     
@@ -67,7 +67,7 @@ static void _handleRequestEP0(VirtualUSBDevice& d, VirtualUSBDevice::Xfer&& xfer
     }
 }
 
-static bool _handleRequestEPX(VirtualUSBDevice& d, VirtualUSBDevice::Xfer&& xfer) {
+static bool _handleRequestEPX(VirtualUSBDevice& dev, VirtualUSBDevice::Data&& data) {
     const uint8_t ep = xfer.getEndpointAddress();
 //    const uint8_t* payload = xfer.payload.get();
 //    const size_t payloadLen = xfer.payloadLen;
@@ -75,17 +75,17 @@ static bool _handleRequestEPX(VirtualUSBDevice& d, VirtualUSBDevice::Xfer&& xfer
     switch (ep) {
     case Endpoint::In1: {
         printf("Endpoint::In1\n");
-        auto lock = std::unique_lock(_Xfers.lock);
-        _Xfers.queue.push_back(std::move(xfer));
-        _Xfers.signal.notify_all();
+        auto lock = std::unique_lock(_Datas.lock);
+        _Datas.queue.push_back(std::move(xfer));
+        _Datas.signal.notify_all();
         break;
     }
     
     case Endpoint::In2: {
         printf("Endpoint::In2\n");
-        auto lock = std::unique_lock(_Xfers.lock);
-        _Xfers.queue.push_back(std::move(xfer));
-        _Xfers.signal.notify_all();
+        auto lock = std::unique_lock(_Datas.lock);
+        _Datas.queue.push_back(std::move(xfer));
+        _Datas.signal.notify_all();
         break;
     }
     
@@ -102,22 +102,22 @@ static bool _handleRequestEPX(VirtualUSBDevice& d, VirtualUSBDevice::Xfer&& xfer
     return true;
 }
 
-static void _handleMessage(VirtualUSBDevice& d, VirtualUSBDevice::Xfer&& xfer) {
+static void _handleData(VirtualUSBDevice& dev, VirtualUSBDevice::Data&& data) {
     // Endpoint 0
-    if (!xfer.cmd.base.ep) _handleRequestEP0(d, std::move(xfer));
+    if (!xfer.cmd.base.ep) _handleRequestEP0(d, std::move(data));
     // Other endpoints
-    else _handleRequestEPX(d, std::move(xfer));
+    else _handleRequestEPX(d, std::move(data));
 }
 
-static void _threadResponse(VirtualUSBDevice& d) {
+static void _threadResponse(VirtualUSBDevice& dev) {
     for (;;) {
-        auto lock = std::unique_lock(_Xfers.lock);
-        while (!_Xfers.dtePresent || _Xfers.queue.empty()) {
-            _Xfers.signal.wait(lock);
+        auto lock = std::unique_lock(_Datas.lock);
+        while (!_Datas.dtePresent || _Datas.queue.empty()) {
+            _Datas.signal.wait(lock);
         }
         
-        VirtualUSBDevice::Xfer xfer = std::move(_Xfers.queue.front());
-        _Xfers.queue.pop_front();
+        VirtualUSBDevice::Data xfer = std::move(_Datas.queue.front());
+        _Datas.queue.pop_front();
         lock.unlock();
         
         const uint8_t ep = xfer.getEndpointAddress();
@@ -154,10 +154,10 @@ int main(int argc, const char* argv[]) {
         .throwOnErr             = true,
     };
     
-    VirtualUSBDevice device(deviceInfo);
+    VirtualUSBDevice dev(deviceInfo);
     try {
         try {
-            device.start();
+            dev.start();
         } catch (std::exception& e) {
             throw RuntimeError(
                 "Failed to start VirtualUSBDevice: %s"                                  "\n"
@@ -171,7 +171,7 @@ int main(int argc, const char* argv[]) {
         printf("Started\n");
         
         std::thread([&] {
-            _threadResponse(device);
+            _threadResponse(dev);
         }).detach();
         
 //        // Test device teardown (after 5 seconds)
@@ -182,14 +182,14 @@ int main(int argc, const char* argv[]) {
 //        }).detach();
         
         for (;;) {
-            VirtualUSBDevice::Xfer xfer = device.read();
-            _handleMessage(device, std::move(xfer));
+            VirtualUSBDevice::Data data = dev.read();
+            _handleData(dev, std::move(data));
         }
         
     } catch (const std::exception& e) {
         fprintf(stderr, "Error: %s\n", e.what());
         // Using _exit to avoid calling destructors for static vars, since that hangs
-        // in __pthread_cond_destroy, because our thread is sitting in _Xfers.signal.wait()
+        // in __pthread_cond_destroy, because our thread is sitting in _Datas.signal.wait()
         _exit(1);
     }
     
