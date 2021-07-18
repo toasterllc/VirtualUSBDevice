@@ -40,11 +40,11 @@ public:
     
     void _PrintCmd(const Cmd& cmd) const {
         printf("Cmd{\n");
-        printf("  command                 = %x\n", cmd.base.command);
-        printf("  seqnum                  = %x\n", cmd.base.seqnum);
-        printf("  devid                   = %x\n", cmd.base.devid);
-        printf("  direction               = %x\n", cmd.base.direction);
-        printf("  ep                      = %x\n", cmd.base.ep);
+        printf("  command                 = %u\n", cmd.base.command);
+        printf("  seqnum                  = %u\n", cmd.base.seqnum);
+        printf("  devid                   = %u\n", cmd.base.devid);
+        printf("  direction               = %u\n", cmd.base.direction);
+        printf("  ep                      = %u\n", cmd.base.ep);
         printf("\n");
         
         switch (cmd.base.command) {
@@ -68,12 +68,12 @@ public:
             break;
         
         case USBIPLib::USBIP_CMD_UNLINK:
-            printf("  seqnum                  = %x\n", cmd.cmd_unlink.seqnum);
+            printf("  seqnum                  = %u\n", cmd.cmd_unlink.seqnum);
             printf("\n");
             break;
         
         case USBIPLib::USBIP_RET_UNLINK:
-            printf("  status                  = %x\n", cmd.ret_unlink.status);
+            printf("  status                  = %d\n", cmd.ret_unlink.status);
             printf("\n");
             break;
         
@@ -227,12 +227,13 @@ public:
     Xfer read() {
         auto lock = std::unique_lock(_s.lock);
         try {
+            while (_s.state & _State::Reading) _s.signal.wait();
             // Bail if there's an error (and therefore we're stopped)
             if (_s.err) std::rethrow_exception(_s.err);
             for (;;) {
                 const Cmd cmd = _readCmd(lock);
-//                printf("Got cmd: ");
-//                _PrintCmd(cmd);
+                printf("Got cmd: ");
+                _PrintCmd(cmd);
                 auto xfer = _handleCmd(lock, cmd);
                 if (xfer) return std::move(*xfer);
             }
@@ -252,30 +253,23 @@ public:
         assert((ep & USB::Endpoint::DirMask) == USB::Endpoint::DirIn);
         const uint8_t epIdx = ep&USB::Endpoint::IdxMask;
         assert(epIdx < std::size(_s.inCmds));
-        auto& epInCmds = _s.inCmds[epIdx];
         
         auto lock = std::unique_lock(_s.lock);
         try {
             // Bail if there's an error (and therefore we're stopped)
             if (_s.err) std::rethrow_exception(_s.err);
             
-            // Send the data immediately if the host has already requested
-            // data for endpoint `ep`
-            if (!epInCmds.empty()) {
-                _reply(lock, epInCmds.front(), data, len);
-                epInCmds.pop_front();
-            
-            // Otherwise, queue the data until the host requests it
-            } else {
-                auto& epInData = _s.inData[epIdx];
-                // Enqueue the data into `epInData`
-                _Data d = {
-                    .data = std::make_unique<uint8_t[]>(len),
-                    .len = len,
-                };
-                memcpy(d.data.get(), data, len);
-                epInData.push_back(std::move(d));
-            }
+            // Enqueue the data into `epInData`
+            auto& epInData = _s.inData[epIdx];
+            _Data d = {
+                .data = std::make_unique<uint8_t[]>(len),
+                .len = len,
+            };
+            memcpy(d.data.get(), data, len);
+            epInData.push_back(std::move(d));
+            // Send the data if there are existing IN transfers
+            _sendDataForInEndpoint(lock, epIdx);
+        
         } catch (const std::exception& e) {
             _reset(lock, std::current_exception());
             if (_info.throwOnErr) {
@@ -381,13 +375,16 @@ private:
     struct _Data {
         std::unique_ptr<uint8_t[]> data;
         size_t len = 0;
+        size_t off = 0;
     };
     
     struct _State {
-        static constexpr uint8_t Idle           = 0;
-        static constexpr uint8_t Started        = 1<<0;
-        static constexpr uint8_t SocketBusy     = 1<<1;
-        static constexpr uint8_t Reset          = 1<<2;
+        static constexpr uint8_t Idle       = 0;
+        static constexpr uint8_t Started    = 1<<0;
+        static constexpr uint8_t Reading    = 1<<1;
+        static constexpr uint8_t Writing    = 1<<2;
+//        static constexpr uint8_t SocketBusy = 1<<1;
+        static constexpr uint8_t Reset      = 1<<3;
     };
     
     USB::SetupRequest _GetSetupRequest(const Cmd& cmd) const {
@@ -557,6 +554,12 @@ private:
         const uint8_t bmAttributes = Endian::HFL_U8(d.bmAttributes);
         return bmAttributes & USB::ConfigurationCharacteristics::SelfPowered;
     }
+    
+//    std::unique_lock<std::mutex> _lock() {
+//        auto lock = std::unique_lock(_s.lock);
+//        // Don't acquire the lock
+//        while (_s.state & _State::SocketBusy) _s.signal.wait(lock);
+//    }
     
 //    void _thread() {
 //        int socket = -1;
@@ -738,24 +741,56 @@ private:
         printf("_handleCmdSubmitEPXIn\n");
         const uint8_t epIdx = cmd.base.ep;
         if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
-        auto& epInData = _s.inData[epIdx];
+        auto& epInCmds = _s.inCmds[epIdx];
+        epInCmds.push_back(cmd);
+        _sendDataForInEndpoint(lock, epIdx);
         
-        // Send the data if we already have some queued for the IN command
-        if (!epInData.empty()) {
-            _Data& d = epInData.front();
-            _reply(lock, cmd, d.data.get(), d.len);
-            epInData.pop_front();
-        
-        // Otherwise, queue the IN command until data is written for the endpoint
-        } else {
-            auto& epInCmds = _s.inCmds[epIdx];
-            epInCmds.push_back(cmd);
-        }
-        
+//        // Send the data if we already have some queued for the IN command
+//        if (!epInData.empty()) {
+//            _Data& d = epInData.front();
+//            _reply(lock, cmd, d.data.get(), d.len);
+//            epInData.pop_front();
+//        
+//        // Otherwise, queue the IN command until data is written for the endpoint
+//        } else {
+//            auto& epInCmds = _s.inCmds[epIdx];
+//            epInCmds.push_back(cmd);
+//        }
+//        
 //        // Otherwise, reply that we don't have any data
 //        } else {
 //            _reply(lock, cmd, nullptr, 0);
 //        }
+    }
+    
+    void _sendDataForInEndpoint(std::unique_lock<std::mutex>& lock, uint8_t epIdx) {
+        assert(lock);
+        auto& epInCmds = _s.inCmds[epIdx];
+        auto& epInData = _s.inData[epIdx];
+        
+        printf("\n\n\n======= epInCmds seqnums START %p ======\n", (void*)pthread_self());
+        for (auto& cmd : epInCmds) {
+            printf("%u ", cmd.base.seqnum);
+        }
+        printf("\n======= epInCmds seqnums END ======\n\n\n");
+        
+        // Send data while there's data requested and data available
+        while (!epInCmds.empty() && !epInData.empty()) {
+            const Cmd& cmd = epInCmds.front();
+            _Data& data = epInData.front();
+            // Limit the length of data to send by the length requested (transfer_buffer_length),
+            // or the length available, whichever is smaller
+            const size_t len = std::min((size_t)cmd.cmd_submit.transfer_buffer_length, data.len-data.off);
+            printf("_sendDataForInEndpoint for seqnum=%u\n", cmd.base.seqnum);
+            _reply(lock, cmd, &data.data[data.off], len);
+            data.off += len;
+            // Pop the command unconditionally
+            epInCmds.pop_front();
+            // Pop the data if we sent it all
+            if (data.off == data.len) {
+                epInData.pop_front();
+            }
+        }
     }
     
     void _handleCmdUnlink(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
@@ -1105,7 +1140,7 @@ private:
     
     struct {
         std::mutex lock; // Struct should only be accessed while holding lock
-//        std::condition_variable signal;
+        std::condition_variable signal;
         uint8_t state = _State::Idle;
         Err err;
         int socket = -1;
