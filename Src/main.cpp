@@ -116,9 +116,9 @@ static void _threadResponse(VirtualUSBDevice& dev) {
         }
         lock.unlock();
         
-        const char text[16] = "Testing 123\r\n";
+        const char text[1024] = "Testing 123\r\n";
         dev.write(Endpoint::In2, text, sizeof(text));
-        usleep(5000);
+        usleep(500000);
     }
 }
 
