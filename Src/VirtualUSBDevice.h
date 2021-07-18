@@ -603,6 +603,16 @@ private:
     // _s.lock must be held
     void _reply(std::unique_lock<std::mutex>& lock, const Cmd& cmd, const void* data, size_t len, int32_t status=0) {
         using namespace Endian;
+        // Validate our arguments:
+        //   - For IN transfers, either we're sending data (len>0) and have a valid data pointer
+        //     (data!=null), or we're not sending data (len==0)
+        //   - For OUT transfers, we can't respond with any data, but the `len` argument is used
+        //     to populate `actual_length` -- the amount of data sent to the device
+        assert(
+            (cmd.base.direction==USBIPLib::USBIP_DIR_IN && ((len && data) || !len)) ||
+            (cmd.base.direction==USBIPLib::USBIP_DIR_OUT && !data)
+        );
+        
         uint32_t command = 0;
         switch (cmd.base.command) {
         case USBIPLib::USBIP_CMD_SUBMIT: command = USBIPLib::USBIP_RET_SUBMIT; break;
@@ -629,7 +639,11 @@ private:
         };
         
         _write(lock, &ret, sizeof(ret));
-        _write(lock, data, len);
+        
+        // If this is an IN transfer and we're sending data, send it
+        if (cmd.base.direction==USBIPLib::USBIP_DIR_IN && len) {
+            _write(lock, data, len);
+        }
     }
     
     std::optional<Xfer> _handleCmd(std::unique_lock<std::mutex>& lock, const Cmd& cmd) {
@@ -712,7 +726,7 @@ private:
         }
         
         // Let host know that we received the data
-        _reply(lock, cmd, nullptr, 0);
+        _reply(lock, cmd, nullptr, payloadLen);
         return Xfer{
             .ep         = _GetEndpointAddr(cmd),
             .data       = std::move(payload),
@@ -934,7 +948,7 @@ private:
                 }
                 
                 if (!ok) throw RuntimeError("invalid Configuration value: %u", configVal);
-                _reply(lock, cmd, nullptr, 0);
+                _reply(lock, cmd, nullptr, payloadLen);
                 return;
             }
             

@@ -153,12 +153,12 @@ int main(int argc, const char* argv[]) {
             _threadResponse(dev);
         }).detach();
         
-        // Test device teardown (after 5 seconds)
-        std::thread([&] {
-            sleep(5);
-            printf("Stopping device...\n");
-            dev.stop();
-        }).detach();
+//        // Test device teardown (after 5 seconds)
+//        std::thread([&] {
+//            sleep(5);
+//            printf("Stopping device...\n");
+//            dev.stop();
+//        }).detach();
         
         for (;;) {
             VirtualUSBDevice::Xfer data = dev.read();
