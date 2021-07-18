@@ -441,11 +441,22 @@ private:
         // Mark the socket as busy so that _reset() won't close it until we're done with it
         _s.state |= _State::SocketBusy;
         lock.unlock();
-        _Read(socket, data, len);
+        
+        // Don't throw while the lock is unlocked
+        // Cache the exception, and re-throw once we re-acquire the lock
+        std::exception_ptr err;
+        try {
+            _Read(socket, data, len);
+        } catch (const std::exception& e){
+            err = std::current_exception();
+        }
+        
         lock.lock();
         _s.state &= ~_State::SocketBusy;
-        // We re-acquired the lock, so check for errors, and bail if so
+        // We re-acquired the lock, so check for existing errors, and bail if so
         if (_s.err) std::rethrow_exception(_s.err);
+        // Throw our new exception if there is one
+        if (err) std::rethrow_exception(err);
     }
     
     void _write(std::unique_lock<std::mutex>& lock, const void* data, size_t len) {
@@ -453,11 +464,22 @@ private:
         // Mark the socket as busy so that _reset() won't close it until we're done with it
         _s.state |= _State::SocketBusy;
         lock.unlock();
-        _Write(socket, data, len);
+        
+        // Don't throw while the lock is unlocked
+        // Cache the exception, and re-throw once we re-acquire the lock
+        std::exception_ptr err;
+        try {
+            _Write(socket, data, len);
+        } catch (const std::exception& e){
+            err = std::current_exception();
+        }
+        
         lock.lock();
         _s.state &= ~_State::SocketBusy;
-        // We re-acquired the lock, so check for errors, and bail if so
+        // We re-acquired the lock, so check for existing errors, and bail if so
         if (_s.err) std::rethrow_exception(_s.err);
+        // Throw our new exception if there is one
+        if (err) std::rethrow_exception(err);
     }
     
     Cmd _readCmd(std::unique_lock<std::mutex>& lock) {
@@ -1030,6 +1052,7 @@ private:
     
     // _s.lock must be held
     void _reset(std::unique_lock<std::mutex>& lock, Err err) {
+        assert(lock);
         // Short-circuit if we've already been reset
         if (_s.state & _State::Reset) return;
         _s.state |= _State::Reset;
