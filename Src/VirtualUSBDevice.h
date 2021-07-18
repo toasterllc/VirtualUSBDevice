@@ -8,12 +8,14 @@
 #include <condition_variable>
 #include <deque>
 #include <set>
+#include <chrono>
 #include <sys/socket.h>
 #include "Endian.h"
 #include "USB.h"
 #include "USBIP.h"
 #include "USBIPLib.h"
 #include "RuntimeError.h"
+using namespace std::chrono_literals;
 
 class VirtualUSBDevice {
 public:
@@ -232,7 +234,7 @@ public:
         _reset(lock, ErrStopped);
     }
     
-    Xfer read() {
+    std::optional<Xfer> read(std::chrono::milliseconds timeout=0ms) {
         auto lock = std::unique_lock(_s.lock);
         try {
             for (;;) {
@@ -243,7 +245,12 @@ public:
                     // Break if a command is available
                     if (!_s.cmds.empty()) break;
                     // Otherwise wait to get signalled
-                    _s.signal.wait(lock);
+                    if (timeout > 0ms) {
+                        const std::cv_status cr = _s.signal.wait_for(lock, timeout);
+                        if (cr == std::cv_status::timeout) return std::nullopt;
+                    } else {
+                        _s.signal.wait(lock);
+                    }
                 }
                 
                 _Cmd cmd = std::move(_s.cmds.front());
@@ -259,7 +266,7 @@ public:
                 // Throw `_s.err`, not `e`, so that we throw the original cause (eg ErrStopped)
                 std::rethrow_exception(_s.err);
             }
-            return {};
+            return std::nullopt;
         }
     }
     

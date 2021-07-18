@@ -29,7 +29,7 @@ struct OP_REP_DEVLIST_DEVICE {
     uint8_t bDeviceSubClass;
     uint8_t bDeviceProtocol;
     uint8_t bConfigurationValue;
-    uint8_t bNumConfigurations; 
+    uint8_t bNumConfigurations;
     uint8_t bNumInterfaces;
 } __attribute__((packed));
 

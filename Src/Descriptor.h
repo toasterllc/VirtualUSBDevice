@@ -23,7 +23,7 @@ constexpr USB::DeviceDescriptor Device = {
     .bNumConfigurations     = LFH_U8(0x01),
 };
 
-constexpr USB::DeviceQualifierDescriptor DeviceQualifier = { 
+constexpr USB::DeviceQualifierDescriptor DeviceQualifier = {
     .bLength                = LFH_U8(sizeof(DeviceQualifier)),
     .bType                  = LFH_U8(0x06),
     .bcdUSB                 = LFH_U16(0x0200),
