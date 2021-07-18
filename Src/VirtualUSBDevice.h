@@ -871,11 +871,11 @@ private:
         auto& epInCmds = _s.inCmds[epIdx];
         auto& epInData = _s.inData[epIdx];
         
-        printf("\n\n\n======= epInCmds seqnums START %p ======\n", (void*)pthread_self());
-        for (auto& cmd : epInCmds) {
-            printf("%u ", cmd.header.base.seqnum);
-        }
-        printf("\n======= epInCmds seqnums END ======\n\n\n");
+//        printf("\n\n\n======= epInCmds seqnums START %p ======\n", (void*)pthread_self());
+//        for (auto& cmd : epInCmds) {
+//            printf("%u ", cmd.header.base.seqnum);
+//        }
+//        printf("\n======= epInCmds seqnums END ======\n\n\n");
         
         // Send data while there's data requested and data available
         while (!epInCmds.empty() && !epInData.empty()) {
@@ -884,7 +884,7 @@ private:
             // Limit the length of data to send by the length requested (transfer_buffer_length),
             // or the length available, whichever is smaller
             const size_t len = std::min((size_t)cmd.header.cmd_submit.transfer_buffer_length, d.len-d.off);
-            printf("_sendDataForInEndpoint for seqnum=%u\n", cmd.header.base.seqnum);
+//            printf("_sendDataForInEndpoint for seqnum=%u\n", cmd.header.base.seqnum);
             _reply(cmd, &d.data[d.off], len);
             d.off += len;
             // Pop the command unconditionally
@@ -915,7 +915,7 @@ private:
             if (found) break;
         }
         
-        printf("UNLINK seqnum=%u: %d\n", cmd.header.cmd_unlink.seqnum, found);
+//        printf("UNLINK seqnum=%u: %d\n", cmd.header.cmd_unlink.seqnum, found);
         
         // status = -ECONNRESET on success
         const int32_t status = (found ? -ECONNRESET : 0);
