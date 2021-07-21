@@ -150,7 +150,7 @@ struct StringDescriptorN : StringDescriptor {
     }
 } __attribute__((packed));
 
-template<size_t N>
+template <size_t N>
 constexpr auto StringDescriptorMake(const char (&str)[N]) {
     return StringDescriptorN<N-1>(str);
 }
@@ -167,7 +167,7 @@ struct SupportedLanguagesDescriptorN : StringDescriptor {
     }
 } __attribute__((packed));
 
-template<size_t N>
+template <size_t N>
 constexpr auto SupportedLanguagesDescriptorMake(const uint16_t (&langs)[N]) {
     return SupportedLanguagesDescriptorN<N>(langs);
 }
