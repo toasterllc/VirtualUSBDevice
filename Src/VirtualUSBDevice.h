@@ -234,7 +234,7 @@ public:
         _reset(lock, ErrStopped);
     }
     
-    std::optional<Xfer> read(std::chrono::milliseconds timeout=0ms) {
+    std::optional<Xfer> read(std::chrono::milliseconds timeout=std::chrono::milliseconds::max()) {
         auto lock = std::unique_lock(_s.lock);
         try {
             for (;;) {
@@ -245,11 +245,16 @@ public:
                     // Break if a command is available
                     if (!_s.cmds.empty()) break;
                     // Otherwise wait to get signalled
-                    if (timeout > 0ms) {
+                    if (timeout == std::chrono::milliseconds::zero()) {
+                        // Check once, which we already did, so bail
+                        return std::nullopt;
+                    } else if (timeout == std::chrono::milliseconds::max()) {
+                        // Wait forever
+                        _s.signal.wait(lock);
+                    } else {
+                        // Wait a specific amount of time
                         const std::cv_status cr = _s.signal.wait_for(lock, timeout);
                         if (cr == std::cv_status::timeout) return std::nullopt;
-                    } else {
-                        _s.signal.wait(lock);
                     }
                 }
                 
