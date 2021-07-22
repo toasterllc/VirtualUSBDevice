@@ -41,8 +41,8 @@ public:
     };
     
     struct _Cmd {
-        USBIP::HEADER header;
-        std::unique_ptr<uint8_t[]> payload;
+        USBIP::HEADER header = {};
+        std::unique_ptr<uint8_t[]> payload = {};
         size_t payloadLen = 0;
     };
     
@@ -1258,5 +1258,5 @@ private:
         std::deque<_Cmd> inCmds[USB::Endpoint::MaxCount];
         std::deque<_Data> inData[USB::Endpoint::MaxCount];
 //        std::set<uint32_t> replySeqnums;
-    } _s;
+    } _s = {};
 };
