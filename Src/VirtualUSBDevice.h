@@ -835,7 +835,7 @@ private:
     }
     
     Xfer _handleCmdSubmitEPXOut(_Cmd& cmd) {
-        printf("_handleCmdSubmitEPXOut\n");
+//        printf("_handleCmdSubmitEPXOut\n");
         const uint8_t epIdx = cmd.header.base.ep;
         if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
         
@@ -849,7 +849,7 @@ private:
     }
     
     void _handleCmdSubmitEPXIn(_Cmd& cmd) {
-        printf("_handleCmdSubmitEPXIn\n");
+//        printf("_handleCmdSubmitEPXIn\n");
         const uint8_t epIdx = cmd.header.base.ep;
         if (epIdx >= USB::Endpoint::MaxCount) throw RuntimeError("invalid epIdx");
         auto& epInCmds = _s.inCmds[epIdx];
