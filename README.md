@@ -17,8 +17,6 @@ To handle USB transfers, call `read()`. Before `read()` returns, `VirtualUSBDevi
 - `data`: the payload data
 - `len`: the length of `data`
 
-For transfers to the default control endpoint (endpoint 0), the `setupReq` field will be populated with the Setup packet.
-
 ## Sending Data
 
 To write data to an IN endpoint, call `write()` with the endpoint, data, and length.
