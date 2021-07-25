@@ -27,7 +27,7 @@ To tear down the virtual USB device, call `stop()`.
 
 ## Error Handling
 
-VirtualUSBDevice can be configured to throw an exception when encountering an error, or alternatively store the error to be queried by the caller. If you choose to disable exceptions, each call to VirtualUSBDevice must be followed by checking `err()` to see whether an error occurred.
+Using the `throwOnErr` member of `VirtualUSBDevice::Info`, VirtualUSBDevice can be configured to throw an exception when encountering an error, or alternatively store the error to be queried by the caller. If you choose to disable exceptions, each call to VirtualUSBDevice must be followed by checking `err()` to see whether an error occurred.
 
 ## Example
 
