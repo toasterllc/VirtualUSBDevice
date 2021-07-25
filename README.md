@@ -6,11 +6,11 @@ The implementation relies on the `usbip` subsystem, but is self-contained and do
 
 ## Creation
 
-To create a virtual USB device, instantiate a `VirtualUSBDevice` (supplying standard USB descriptors to the constructor), and call `start()`.
+To create a virtual USB device, instantiate a VirtualUSBDevice (supplying standard USB descriptors to the constructor), and call `start()`.
 
 ## Handling Transfers
 
-To handle USB transfers, call `read()`. Before `read()` returns, `VirtualUSBDevice()` will automatically handle standard USB requests (such as `GET_STATUS`, `GET_DESCRIPTOR`, `SET_CONFIGURATION` requests, and all IN transfers), and will only return from `read()` when there's an OUT transfer that it can't handle itself. The returned `VirtualUSBDevice::Xfer` object represents the USB OUT transfer to be performed, and contains these fields:
+To handle USB transfers, call `read()`. Before `read()` returns, VirtualUSBDevice will automatically handle standard USB requests (such as `GET_STATUS`, `GET_DESCRIPTOR`, `SET_CONFIGURATION` requests, and all IN transfers), and will only return from `read()` when there's an OUT transfer that it can't handle itself. The returned `Xfer` object represents the USB OUT transfer to be performed, and contains these fields:
 
 - `ep`: the transfer's endpoint
 - `setupReq`: if ep==0, the Setup packet
