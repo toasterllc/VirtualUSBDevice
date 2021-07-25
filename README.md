@@ -37,4 +37,4 @@ The included example (`main.cpp`) implements a simple ACM/CDC USB serial device 
 
 ## Thanks
 
-Thanks to the [https://github.com/smulikHakipod/USB-Emulation](USB-Emulation) and [USBIP-Virtual-USB-Device](https://github.com/lcgamboa/USBIP-Virtual-USB-Device) projects for trailblazing and illustrating the techniques used by this project.
+Thanks to the [USB-Emulation](https://github.com/smulikHakipod/USB-Emulation) and [USBIP-Virtual-USB-Device](https://github.com/lcgamboa/USBIP-Virtual-USB-Device) projects for trailblazing and illustrating the techniques used by this project.
