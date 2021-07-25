@@ -34,3 +34,7 @@ VirtualUSBDevice can be configured to throw an exception when encountering an er
 ## Example
 
 The included example (`main.cpp`) implements a simple ACM/CDC USB serial device that can be accessed at `/dev/ttyACM0` (or `ttyACM1`, etc). The example outputs periodic messages while consuming input sent to the device.
+
+## Thanks
+
+Thanks to the [https://github.com/smulikHakipod/USB-Emulation](USB-Emulation) and [USBIP-Virtual-USB-Device](https://github.com/lcgamboa/USBIP-Virtual-USB-Device) projects for trailblazing and illustrating the techniques used by this project.
