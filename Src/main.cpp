@@ -16,11 +16,11 @@ static void _handleXferEP0(VirtualUSBDevice& dev, VirtualUSBDevice::Xfer&& xfer)
     const uint8_t* payload = xfer.data.get();
     const size_t payloadLen = xfer.len;
     
-    // Verify that this request is a Class request
+    // Verify that this request is a `Class` request
     if ((req.bmRequestType&USB::RequestType::TypeMask) != USB::RequestType::TypeClass)
         throw RuntimeError("invalid request bmRequestType (TypeClass)");
     
-    // Verify that this request is intended for the interface
+    // Verify that the recipient is the `Interface`
     if ((req.bmRequestType&USB::RequestType::RecipientMask) != USB::RequestType::RecipientInterface)
         throw RuntimeError("invalid request bmRequestType (RecipientInterface)");
     
@@ -161,7 +161,7 @@ int main(int argc, const char* argv[]) {
 //        }).detach();
         
         for (;;) {
-            VirtualUSBDevice::Xfer data = dev.read();
+            VirtualUSBDevice::Xfer data = *dev.read();
             _handleXfer(dev, std::move(data));
         }
         
