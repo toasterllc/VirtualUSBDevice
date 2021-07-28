@@ -1,7 +1,7 @@
 #include <climits>
 #include "VirtualUSBDevice.h"
 #include "Descriptor.h"
-#include "RuntimeError.h"
+#include "Toastbox/RuntimeError.h"
 
 static USB::CDC::LineCoding _LineCoding = {};
 

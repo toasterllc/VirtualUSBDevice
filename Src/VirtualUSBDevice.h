@@ -10,11 +10,11 @@
 #include <set>
 #include <chrono>
 #include <sys/socket.h>
-#include "Endian.h"
-#include "USB.h"
 #include "USBIP.h"
 #include "USBIPLib.h"
-#include "RuntimeError.h"
+#include "Toastbox/Endian.h"
+#include "Toastbox/USB.h"
+#include "Toastbox/RuntimeError.h"
 using namespace std::chrono_literals;
 
 class VirtualUSBDevice {

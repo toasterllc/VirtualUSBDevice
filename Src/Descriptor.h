@@ -1,6 +1,6 @@
 #pragma once
-#include "Endian.h"
-#include "USB.h"
+#include "Toastbox/Endian.h"
+#include "Toastbox/USB.h"
 
 namespace Descriptor {
 
