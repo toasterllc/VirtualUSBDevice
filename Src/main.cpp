@@ -25,7 +25,7 @@ static void _handleXferEP0(VirtualUSBDevice& dev, VirtualUSBDevice::Xfer&& xfer)
         throw RuntimeError("invalid request bmRequestType (RecipientInterface)");
     
     switch (req.bmRequestType&USB::RequestType::DirectionMask) {
-    case USB::RequestType::DirectionHostToDevice:
+    case USB::RequestType::DirectionOut:
         switch (req.bRequest) {
         case USB::CDC::Request::SET_LINE_CODING: {
             if (payloadLen != sizeof(_LineCoding))
@@ -63,10 +63,10 @@ static void _handleXferEP0(VirtualUSBDevice& dev, VirtualUSBDevice::Xfer&& xfer)
         }
         
         default:
-            throw RuntimeError("invalid request (DirectionHostToDevice): %x", req.bRequest);
+            throw RuntimeError("invalid request (DirectionOut): %x", req.bRequest);
         }
     
-    case USB::RequestType::DirectionDeviceToHost:
+    case USB::RequestType::DirectionIn:
         switch (req.bRequest) {
         case USB::CDC::Request::GET_LINE_CODING: {
             printf("GET_LINE_CODING\n");
@@ -77,7 +77,7 @@ static void _handleXferEP0(VirtualUSBDevice& dev, VirtualUSBDevice::Xfer&& xfer)
         }
         
         default:
-            throw RuntimeError("invalid request (DirectionDeviceToHost): %x", req.bRequest);
+            throw RuntimeError("invalid request (DirectionIn): %x", req.bRequest);
         }
     
     default:

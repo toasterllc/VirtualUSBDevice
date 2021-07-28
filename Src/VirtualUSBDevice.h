@@ -287,7 +287,7 @@ private:
             break;
         
         default:
-            throw RuntimeError("unknown USBIP command: %u", cmd.header.base.command);
+            throw RuntimeError("unknown USBIP command: %u", (uint32_t)cmd.header.base.command);
         }
         
         if (cmd.header.base.command==USBIPLib::USBIP_CMD_SUBMIT &&
@@ -509,7 +509,7 @@ private:
             return std::nullopt;
         
         default:
-            throw RuntimeError("invalid USBIP command: %u", cmd.header.base.command);
+            throw RuntimeError("invalid USBIP command: %u", (uint32_t)cmd.header.base.command);
         }
     }
     
