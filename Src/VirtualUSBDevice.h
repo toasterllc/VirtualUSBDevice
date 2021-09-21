@@ -157,8 +157,8 @@ public:
     
     void write(uint8_t ep, const void* data, size_t len) {
         // Must be an IN endpoint
-        assert((ep & USB::Endpoint::DirMask) == USB::Endpoint::DirIn);
-        const uint8_t epIdx = ep&USB::Endpoint::IdxMask;
+        assert((ep & USB::Endpoint::DirectionMask) == USB::Endpoint::DirectionIn);
+        const uint8_t epIdx = ep&USB::Endpoint::IndexMask;
         assert(epIdx < std::size(_s.inCmds));
         
         auto lock = std::unique_lock(_s.lock);
