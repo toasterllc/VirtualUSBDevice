@@ -18,6 +18,11 @@
 using namespace std::chrono_literals;
 
 class VirtualUSBDevice {
+// Macros until C++ supports class-scoped namespace aliases / `using namespace` in class scope
+#define USB             Toastbox::USB
+#define RuntimeError    Toastbox::RuntimeError
+#define Endian          Toastbox::Endian
+
 public:
     struct Info {
         const USB::DeviceDescriptor* deviceDesc = nullptr;
@@ -803,4 +808,8 @@ private:
         std::deque<_Cmd> inCmds[USB::Endpoint::MaxCount];
         std::deque<_Data> inData[USB::Endpoint::MaxCount];
     } _s = {};
+
+#undef USB
+#undef RuntimeError
+#undef Endian
 };
