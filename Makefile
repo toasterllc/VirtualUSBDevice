@@ -1,5 +1,5 @@
 NAME=VirtualUSBDevice
-OBJECTS=src/main.o
+OBJECTS=Src/main.o
 
 CXX      = g++
 CXXFLAGS = -O0 -g3 -Wall -std=c++17 -iquote Lib
