@@ -2,6 +2,7 @@
 #include "VirtualUSBDevice.h"
 #include "Descriptor.h"
 #include "Toastbox/RuntimeError.h"
+using namespace Toastbox;
 
 static USB::CDC::LineCoding _LineCoding = {};
 
@@ -72,7 +73,7 @@ static void _handleXferEP0(VirtualUSBDevice& dev, VirtualUSBDevice::Xfer&& xfer)
             printf("GET_LINE_CODING\n");
             if (payloadLen != sizeof(_LineCoding))
                 throw RuntimeError("SET_LINE_CODING: payloadLen doesn't match sizeof(USB::CDC::LineCoding)");
-            dev.write(USB::Endpoint::DefaultIn, &_LineCoding, sizeof(_LineCoding));
+            dev.write(USB::Endpoint::DirectionIn|USB::Endpoint::Default, &_LineCoding, sizeof(_LineCoding));
             return;
         }
         

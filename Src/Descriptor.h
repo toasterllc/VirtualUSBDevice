@@ -4,7 +4,8 @@
 
 namespace Descriptor {
 
-using namespace Endian;
+using namespace Toastbox;
+using namespace Toastbox::Endian;
 
 constexpr USB::DeviceDescriptor Device = {
     .bLength                = LFH_U8(sizeof(Device)),
